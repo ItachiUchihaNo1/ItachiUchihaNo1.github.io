@@ -34,7 +34,7 @@ def plan(root=ROOT):
 def digest(data):return hashlib.sha256(data).hexdigest()
 
 class Publisher:
-    def __init__(self,ftp,base,commit):
+    def __init__(self,ftp,base,commit,recovery_commit=None):
         if not re.fullmatch(r'[a-f0-9]{40}',commit):raise ValueError('Invalid commit')
         if not base.startswith('/') or '..' in PurePosixPath(base).parts or any(c in base for c in '\r\n\\'):
             raise ValueError('Invalid FTP base path')
@@ -42,7 +42,7 @@ class Publisher:
         self.release=commit+'-'+str(time.time_ns())
         self.private=self.base+'/morshed-core/.deploy/'+self.release
         self.marker=self.base+'/morshed-core/.deploy/maintenance.json'
-        self.applied=[];self.maintenance=False;self.phase='preflight'
+        self.applied=[];self.maintenance=False;self.phase='preflight';self.known_dirs={'/'};self.recovery_commit=recovery_commit
     def read(self,path):
         out=io.BytesIO();self.ftp.retrbinary('RETR '+path,out.write);return out.getvalue()
     def exists(self,path):
@@ -54,15 +54,15 @@ class Publisher:
         return False
     def mkdir(self,path,mode='700'):
         # Existing deployment/public directories must be usable; do not treat other errors as absence.
-        self.ftp.cwd('/')
         parts=PurePosixPath(path).parts[1:]
         built=''
         for part in parts:
             built+='/'+part
+            if built in self.known_dirs:continue
             try:self.ftp.cwd(built)
             except ftplib.error_perm:
                 self.ftp.mkd(built);self.ftp.sendcmd('SITE CHMOD '+mode+' '+built)
-        self.ftp.cwd('/')
+            self.known_dirs.add(built)
     def upload(self,path,data,mode):
         self.mkdir(str(PurePosixPath(path).parent))
         self.ftp.storbinary('STOR '+path,io.BytesIO(data))
@@ -81,7 +81,12 @@ class Publisher:
                 raise RuntimeError('FTP_ROOT_MISMATCH') from None
             if not present:raise RuntimeError('FTP_ROOT_MISMATCH')
         self.mkdir(self.base+'/morshed-core/.deploy')
-        if self.exists(self.marker):raise RuntimeError('Existing maintenance marker requires operator review')
+        if self.exists(self.marker):
+            try:marker=json.loads(self.read(self.marker))
+            except (ValueError,UnicodeError):raise RuntimeError('Existing maintenance marker requires operator review') from None
+            if not re.fullmatch('[a-f0-9]{40}',self.recovery_commit or '') or marker!={'commit':self.recovery_commit}:
+                raise RuntimeError('Existing maintenance marker requires operator review')
+            print('Completing only the user-approved interrupted commit '+self.recovery_commit+'; its backups remain private.',flush=True)
         # Check fixed public entrypoints, never read private configuration.
         for top,realm in [('morshedapp.ir','site'),('admin.morshedapp.ir','admin')]:
             data=self.read(self.base+'/'+top+'/index.php')
@@ -90,22 +95,27 @@ class Publisher:
         if not all(allowed(name) or name=='morshedapp.ir/_release.json' for name in files):raise ValueError('Forbidden deployment path')
         self.preflight();self.phase='stage'
         # Every byte is verified before any running code is replaced.
-        for name,data in files.items():
+        print('Staging '+str(len(files))+' source files; active files remain unchanged.',flush=True)
+        for index,(name,data) in enumerate(files.items(),1):
             mode='600' if name.startswith('morshed-core/') else '644'
             self.upload(self.private+'/stage/'+name,data,mode)
+            if index%10==0 or index==len(files):print('STAGED '+str(index)+'/'+str(len(files)),flush=True)
         self.phase='activate';self.begin_maintenance()
+        print('All staged bytes verified; activating with private backups.',flush=True)
         try:
             for name in sorted(files,key=lambda n:(n.startswith('morshed-core/'),n.endswith('bootstrap.php'),n)):
                 target=self.base+'/'+name;backup=self.private+'/backup/'+name
-                mode='600' if name.startswith('morshed-core/') else '644'
-                self.mkdir(str(PurePosixPath(target).parent),'755' if mode=='644' else '700')
-                if mode=='644':self.ftp.sendcmd('SITE CHMOD 755 '+str(PurePosixPath(target).parent))
+                is_core=name.startswith('morshed-core/')
+                mode='644' if not is_core or name.endswith('.php') else '600'
+                self.mkdir(str(PurePosixPath(target).parent),'700' if is_core else '755')
+                if not is_core:self.ftp.sendcmd('SITE CHMOD 755 '+str(PurePosixPath(target).parent))
                 had_old=self.exists(target)
                 if had_old:
                     self.mkdir(str(PurePosixPath(backup).parent));self.ftp.rename(target,backup)
                 record={'target':target,'backup':backup,'old':had_old,'installed':False};self.applied.append(record)
                 self.ftp.rename(self.private+'/stage/'+name,target);record['installed']=True
                 self.ftp.sendcmd('SITE CHMOD '+mode+' '+target)
+                if len(self.applied)%10==0:print('ACTIVATED '+str(len(self.applied))+'/'+str(len(files)),flush=True)
             self.phase='http-smoke';self.end_maintenance();smoke(files)
         except Exception:
             self.phase='rollback'
@@ -152,7 +162,7 @@ def main():
     ftp=ftplib.FTP_TLS(context=context,timeout=45)
     ftp.connect(os.environ['DEPLOY_FTPS_HOST'],int(os.environ.get('DEPLOY_FTPS_PORT','21')))
     ftp.auth();ftp.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);ftp.prot_p();ftp.set_pasv(True);ftp.voidcmd('TYPE I')
-    publisher=Publisher(ftp,os.environ.get('DEPLOY_FTPS_BASE','/'),commit)
+    publisher=Publisher(ftp,os.environ.get('DEPLOY_FTPS_BASE','/'),commit,os.environ.get('DEPLOY_RECOVER_COMMIT'))
     try:publisher.publish(files,smoke);print('DEPLOYED '+commit+'; public assets and pages verified. Runtime configuration and database preserved.')
     finally:ftp.close()
 

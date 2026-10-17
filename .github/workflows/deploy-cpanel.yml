@@ -22,13 +22,15 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_BASE: ${{ vars.DEPLOY_FTPS_BASE || '/' }}
+      # Explicit user approval applies only to completing this observed timed-out commit.
+      DEPLOY_RECOVER_COMMIT: d6c7d91208bac5ded226248d6e5ab906b6d4b6ec
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # verified official v6
         with:

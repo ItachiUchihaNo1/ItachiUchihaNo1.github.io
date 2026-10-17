@@ -8,8 +8,9 @@ class FakeFTP:
         self.files={'/morshed-core/config/local.php':b'PRIVATE-SECRET-DO-NOT-READ','/morshed-core/bootstrap.php':b'old core',
                     '/morshedapp.ir/index.php':b"<?php morshed_run('site');",'/admin.morshedapp.ir/index.php':b"<?php morshed_run('admin');",'/morshedapp.ir/assets/app.css':b'old css'}
         self.dirs={'/','/morshed-core','/morshed-core/config','/morshedapp.ir','/morshedapp.ir/assets','/admin.morshedapp.ir'}
-        self.commands=[];self.reads=[];self.fail_target=None
+        self.commands=[];self.reads=[];self.fail_target=None;self.cwd_calls=0
     def cwd(self,p):
+        self.cwd_calls+=1
         if p not in self.dirs:raise ftplib.error_perm('550 Directory missing')
     def mkd(self,p):self.dirs.add(p)
     def mlsd(self,p,facts=None):
@@ -39,7 +40,7 @@ class DeployTests(unittest.TestCase):
         p.publish({'morshedapp.ir/assets/app.css':b'new css','morshed-core/bootstrap.php':b'new core'},lambda files:self.assertEqual(ftp.files['/morshedapp.ir/assets/app.css'],b'new css'))
         self.assertEqual(ftp.files['/morshed-core/config/local.php'],b'PRIVATE-SECRET-DO-NOT-READ')
         self.assertIn('SITE CHMOD 644 /morshedapp.ir/assets/app.css',ftp.commands)
-        self.assertIn('SITE CHMOD 600 /morshed-core/bootstrap.php',ftp.commands)
+        self.assertIn('SITE CHMOD 644 /morshed-core/bootstrap.php',ftp.commands)
         self.assertNotIn(p.marker,ftp.files);self.assertNotIn('/morshed-core/config/local.php',ftp.reads)
     def test_failed_http_check_restores_all_previous_files(self):
         ftp=FakeFTP();old=ftp.files.copy();p=deploy.Publisher(ftp,'/','b'*40)
@@ -69,5 +70,18 @@ class DeployTests(unittest.TestCase):
         ftp.mlsd=reject
         with self.assertRaisesRegex(ftplib.error_perm,'522'):
             deploy.Publisher(ftp,'/','f'*40).preflight()
+    def test_repeated_directory_setup_avoids_redundant_network_calls(self):
+        ftp=FakeFTP();p=deploy.Publisher(ftp,'/','a'*40)
+        p.mkdir('/morshed-core/.deploy/stage');calls=ftp.cwd_calls
+        p.mkdir('/morshed-core/.deploy/stage');self.assertEqual(ftp.cwd_calls,calls)
+        p.upload('/morshed-core/.deploy/stage/a.php',b'one','600')
+        p.upload('/morshed-core/.deploy/stage/b.php',b'two','600')
+        self.assertEqual(ftp.cwd_calls,calls)
+    def test_recovery_requires_exact_user_approved_interrupted_commit(self):
+        ftp=FakeFTP();ftp.dirs.add('/morshed-core/.deploy');ftp.files['/morshed-core/.deploy/maintenance.json']=b'{"commit":"'+b'a'*40+b'"}'
+        with self.assertRaises(RuntimeError):deploy.Publisher(ftp,'/','b'*40,'c'*40).preflight()
+        p=deploy.Publisher(ftp,'/','b'*40,'a'*40)
+        p.publish({'morshed-core/bootstrap.php':b'repaired','morshedapp.ir/assets/app.css':b'new'},lambda _:None)
+        self.assertEqual(ftp.files['/morshed-core/bootstrap.php'],b'repaired');self.assertNotIn(p.marker,ftp.files)
 
 if __name__=='__main__':unittest.main()
