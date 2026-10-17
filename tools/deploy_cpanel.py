@@ -74,8 +74,11 @@ class Publisher:
         if self.maintenance:self.ftp.delete(self.marker);self.maintenance=False
     def preflight(self):
         for path in ['morshed-core/config/local.php','morshed-core/bootstrap.php','morshedapp.ir/index.php','admin.morshedapp.ir/index.php']:
+            print('Checking installed component: '+path,flush=True)
             try:present=self.exists(self.base+'/'+path)
-            except ftplib.error_perm:raise RuntimeError('FTP_ROOT_MISMATCH') from None
+            except ftplib.error_perm as error:
+                if not str(error).startswith('550'):raise
+                raise RuntimeError('FTP_ROOT_MISMATCH') from None
             if not present:raise RuntimeError('FTP_ROOT_MISMATCH')
         self.mkdir(self.base+'/morshed-core/.deploy')
         if self.exists(self.marker):raise RuntimeError('Existing maintenance marker requires operator review')

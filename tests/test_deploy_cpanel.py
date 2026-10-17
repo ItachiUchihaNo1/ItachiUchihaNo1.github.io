@@ -63,5 +63,11 @@ class DeployTests(unittest.TestCase):
     def test_invalid_commit_or_base_path_is_rejected(self):
         for base,sha in [('/../../','f'*40),('/','main'),('/\r\n','f'*40)]:
             with self.assertRaises(ValueError):deploy.Publisher(FakeFTP(),base,sha)
+    def test_tls_data_error_is_not_reported_as_wrong_directory(self):
+        ftp=FakeFTP()
+        def reject(*args,**kwargs):raise ftplib.error_perm('522 TLS data connection rejected')
+        ftp.mlsd=reject
+        with self.assertRaisesRegex(ftplib.error_perm,'522'):
+            deploy.Publisher(ftp,'/','f'*40).preflight()
 
 if __name__=='__main__':unittest.main()
