@@ -12,5 +12,3 @@
 <?php else: ?><article class="card experience-card"><div class="experience-art" aria-hidden="true"><?= $this->icon('book') ?></div><h3><?= $this->h($item['title']) ?></h3><p class="muted small"><?= $this->h(function_exists('mb_substr')?mb_substr($item['body']??'',0,120):'') ?></p><p class="small">صاحب تجربه: <?= $this->h($item['display_name']??'') ?></p><a class="card-action" href="<?= $this->h($this->url('/experience?id='.$item['id'])) ?>">مطالعه و گفت‌وگو با صاحب تجربه <?= $this->icon('arrow') ?></a></article><?php endif; endforeach; ?></div>
 <?php else: ?><p class="empty card muted">هنوز <?= $kind==='mentors'?'صاحب‌تجربه‌ای':($kind==='experiences'?'تجربه‌ای':'موضوعی') ?> برای این بخش منتشر نشده است.</p><?php endif; endif; ?></section><?php endforeach; ?>
 <section class="card section how-it-works"><h2>سه قدم تا یک گفت‌وگوی مفید</h2><div class="grid3"><p><b>۰۱</b> مسئله‌ات را جست‌وجو کن</p><p><b>۰۲</b> صاحب تجربه را بشناس</p><p><b>۰۳</b> درخواست گفت‌وگو بده</p></div><p class="muted small">مشاوره در نسخهٔ اول رایگان است. رزرو عمومی تا نهایی‌شدن شرایط ضبط و نگهداری آرشیو فعال نشده است.</p></section>
-
-<?php require __DIR__.'/home-footer.php'; ?>
