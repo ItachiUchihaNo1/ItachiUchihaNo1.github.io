@@ -35,6 +35,13 @@ class DeployTests(unittest.TestCase):
             with self.subTest(name=name):self.assertFalse(deploy.allowed(name))
     def test_real_source_plan_has_assets_and_no_private_config(self):
         files=deploy.plan();self.assertIn('morshedapp.ir/assets/morshed-logo.png',files);self.assertNotIn('morshed-core/config/local.php',files)
+    def test_updates_never_replace_domain_php_handler_configuration(self):
+        files=deploy.plan()
+        for path in ['morshedapp.ir/.htaccess','admin.morshedapp.ir/.htaccess']:
+            self.assertNotIn(path,files)
+            ftp=FakeFTP();old=ftp.files.copy()
+            with self.assertRaises(ValueError):deploy.Publisher(ftp,'/','a'*40).publish({path:b'replacement'},lambda _:None)
+            self.assertEqual(old,ftp.files)
     def test_successful_publish_sets_public_644_and_preserves_private_data(self):
         ftp=FakeFTP();p=deploy.Publisher(ftp,'/','a'*40)
         p.publish({'morshedapp.ir/assets/app.css':b'new css','morshed-core/bootstrap.php':b'new core'},lambda files:self.assertEqual(ftp.files['/morshedapp.ir/assets/app.css'],b'new css'))

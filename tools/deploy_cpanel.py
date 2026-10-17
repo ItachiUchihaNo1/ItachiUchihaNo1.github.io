@@ -16,6 +16,10 @@ def allowed(name):
             and (p.suffix in ALLOWED_EXT or p.name=='.htaccess')
             and p.name!='local.php' and '\\' not in name and not any(ord(x)<32 for x in name))
 
+def host_managed(name):
+    # cPanel may write per-domain PHP handlers here. Updates must preserve them.
+    return name in {'morshedapp.ir/.htaccess','admin.morshedapp.ir/.htaccess'}
+
 def plan(root=ROOT):
     migrations=sorted((root/'morshed-core/database/migrations').glob('*.sql'))
     if not migrations or max(int(p.name.split('_')[0]) for p in migrations)!=6:
@@ -26,7 +30,7 @@ def plan(root=ROOT):
             if p.is_symlink():raise ValueError('Symlinks are not deployable')
             if p.is_file():
                 name=p.relative_to(root).as_posix()
-                if allowed(name):files[name]=p.read_bytes()
+                if allowed(name) and not host_managed(name):files[name]=p.read_bytes()
     for required in ['morshedapp.ir/index.php','morshedapp.ir/assets/app.css','morshedapp.ir/assets/product.js','morshed-core/bootstrap.php']:
         if required not in files:raise ValueError('Incomplete deployment source')
     return files
@@ -92,7 +96,7 @@ class Publisher:
             data=self.read(self.base+'/'+top+'/index.php')
             if ("morshed_run('"+realm+"')").encode() not in data:raise RuntimeError('Wrong public entrypoint')
     def publish(self,files,smoke):
-        if not all(allowed(name) or name=='morshedapp.ir/_release.json' for name in files):raise ValueError('Forbidden deployment path')
+        if not all((allowed(name) and not host_managed(name)) or name=='morshedapp.ir/_release.json' for name in files):raise ValueError('Forbidden deployment path')
         self.preflight();self.phase='stage'
         # Every byte is verified before any running code is replaced.
         print('Staging '+str(len(files))+' source files; active files remain unchanged.',flush=True)
