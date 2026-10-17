@@ -4,3 +4,4 @@ morshed-core/storage/*
 *.log
 .env
 work/
+morshed-core/.deploy/

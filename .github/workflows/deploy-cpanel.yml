@@ -1,0 +1,58 @@
+name: Deploy Morshed to cPanel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'morshed-core/**'
+      - 'morshedapp.ir/**'
+      - 'admin.morshedapp.ir/**'
+      - 'tools/deploy_cpanel.py'
+      - 'tests/test_deploy_cpanel.py'
+      - '.github/workflows/deploy-cpanel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: morshed-cpanel-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+      DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
+      DEPLOY_FTPS_BASE: ${{ vars.DEPLOY_FTPS_BASE || '/' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # verified official v6
+        with:
+          persist-credentials: false
+      - name: Validate PHP and deployment safeguards
+        run: |
+          php -r 'exit(PHP_VERSION_ID >= 80200 ? 0 : 1);'
+          find morshed-core morshedapp.ir admin.morshedapp.ir -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+          python3 -m unittest discover -s tests -p test_deploy_cpanel.py -v
+      - name: Check required private connection settings
+        id: connection
+        shell: bash
+        run: |
+          ready=true
+          for key in DEPLOY_FTPS_HOST DEPLOY_FTPS_USER DEPLOY_FTPS_PASSWORD; do
+            if [ -z "${!key}" ]; then
+              echo "::warning::Missing repository secret: $key. No upload attempted."
+              ready=false
+            fi
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+      - name: Upload with private backup and verify public pages
+        if: steps.connection.outputs.ready == 'true'
+        run: python3 tools/deploy_cpanel.py
+      - name: Report pending setup
+        if: steps.connection.outputs.ready != 'true'
+        run: echo 'Deployment is waiting for FTPS secrets. This run did not update cPanel.'

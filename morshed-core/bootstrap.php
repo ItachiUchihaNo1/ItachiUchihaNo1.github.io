@@ -41,6 +41,10 @@ function morshed_write_installation_log(string $incident,string $reason,?string 
 }
 function morshed_run(string $realm):void
 {
+    if(is_file(__DIR__.'/.deploy/maintenance.json')){
+        http_response_code(503);header('Content-Type: text/html; charset=utf-8');header('Cache-Control: no-store');header('Retry-After: 30');
+        echo '<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><title>به‌روزرسانی مرشد</title><p>مرشد در حال به‌روزرسانی است؛ چند لحظه دیگر دوباره تلاش کنید.</p></html>';return;
+    }
     header('Content-Type: text/html; charset=utf-8');header('Cache-Control: no-store, private');header('X-Content-Type-Options: nosniff');header('Referrer-Policy: same-origin');
     header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
