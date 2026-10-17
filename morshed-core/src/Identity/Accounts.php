@@ -9,15 +9,31 @@ final class Accounts
     public function __construct(private Database $db,private RateLimiter $rate,private Audit $audit,private SmsGateway $sms,private string $key) {}
     public function passwordLogin(string $phone,string $password,string $ip):string
     {
-        $phone=Security::phone($phone);
-        $this->rate->hit('site-login-ip:'.$ip,20,900);$this->rate->hit('site-login-phone:'.$phone,8,900);
-        $u=$this->db->one('SELECT id,password_hash,status,phone_verified_at FROM m_users WHERE phone=?',[$phone]);
+        $login=strtolower(trim(Security::digits($phone)));$isPhone=preg_match('/^(?:09|\+98|0098)/',$login)===1;if($isPhone){$login=Security::phone($login);}elseif(!preg_match('/^[a-z][a-z0-9_]{3,31}$/D',$login)){throw new Problem('INVALID_CREDENTIALS','نام کاربری، شماره یا رمز صحیح نیست.',401);}
+        $this->rate->hit('site-login-ip:'.$ip,20,900);$this->rate->hit('site-login-phone:'.$login,8,900);
+        $u=$isPhone?$this->db->one('SELECT id,password_hash,status,phone_verified_at FROM m_users WHERE phone=?',[$login]):$this->db->one("SELECT u.id,u.password_hash,u.status,u.phone_verified_at FROM m_users u JOIN m_auth_identities i ON i.user_id=u.id WHERE i.provider='local_username' AND i.subject=?",[$login]);
         $ok=Security::verifyPassword($password,$u['password_hash']??self::DUMMY_HASH);
-        if(!$u || !$ok || !$u['password_hash'] || !$u['phone_verified_at'] || $u['status']!=='active') {
+        if(!$u || !$ok || !$u['password_hash'] || ($isPhone&&!$u['phone_verified_at']) || $u['status']!=='active') {
             $this->audit->add(null,'site','auth.password_failed');
-            throw new Problem('INVALID_CREDENTIALS','شماره یا رمز صحیح نیست یا حساب قابل استفاده نیست.',401);
+            throw new Problem('INVALID_CREDENTIALS','نام کاربری، شماره یا رمز صحیح نیست یا حساب قابل استفاده نیست.',401);
         }
         return $u['id'];
+    }
+    public function username(string $uid):?string
+    {$r=$this->db->one("SELECT subject FROM m_auth_identities WHERE user_id=? AND provider='local_username'",[$uid]);return $r['subject']??null;}
+    public function complete(array $actor,string $username,string $password,string $current=''):void
+    {
+        $username=strtolower(trim($username));if(!preg_match('/^[a-z][a-z0-9_]{3,31}$/D',$username)){throw new Problem('INVALID_INPUT','نام کاربری باید ۴ تا ۳۲ حرف انگلیسی، عدد یا زیرخط باشد و با حرف شروع شود.');}
+        $this->rate->hit('complete-account:'.$actor['user_id'],8,900);$hash=Security::hashPassword($password);
+        $this->db->tx(function()use($actor,$username,$hash,$current){
+            if(($actor['realm']??'')!=='site'){throw new Problem('ACCESS_DENIED','این عملیات مخصوص حساب سایت است.',403);}
+            $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$u=$this->db->one("SELECT password_hash FROM m_users WHERE id=? AND status='active' FOR UPDATE",[$actor['user_id']]);
+            $session=$this->db->one("SELECT auth_at FROM m_auth_sessions WHERE id=? AND user_id=? AND realm='site' AND revoked_at IS NULL AND expires_at>?",[$actor['session_id']??'',$actor['user_id'],time()]);
+            if(!$u||!$session||($u['password_hash']?!Security::verifyPassword($current,$u['password_hash']):((int)$session['auth_at']<time()-300))){throw new Problem('REAUTH_REQUIRED','رمز فعلی یا ورود تازه برای تکمیل حساب لازم است.',403);}
+            $owner=$this->db->one("SELECT user_id FROM m_auth_identities WHERE provider='local_username' AND subject=?",[$username]);if($owner&&$owner['user_id']!==$actor['user_id']){throw new Problem('USERNAME_TAKEN','این نام کاربری قبلاً انتخاب شده است.',409);}
+            $old=$this->username($actor['user_id']);if($old){$this->db->run("UPDATE m_auth_identities SET subject=? WHERE user_id=? AND provider='local_username'",[$username,$actor['user_id']]);}else{$this->db->run("INSERT INTO m_auth_identities(id,user_id,provider,subject,created_at) VALUES(?,?,'local_username',?,?)",[Security::id(),$actor['user_id'],$username,time()]);}
+            $this->db->run('UPDATE m_users SET password_hash=?,updated_at=? WHERE id=?',[$hash,time(),$actor['user_id']]);$this->db->run("UPDATE m_auth_sessions SET revoked_at=? WHERE user_id=? AND realm='site' AND id<>? AND revoked_at IS NULL",[time(),$actor['user_id'],$actor['session_id']]);$this->audit->add($actor['user_id'],'site','account.credentials_completed');
+        });
     }
     public function requestCode(string $phone,string $purpose,string $ip,?array $actor=null,string $currentPassword=''):string
     {
@@ -93,8 +109,8 @@ final class Accounts
         $hash=Security::hashPassword($new);
         $this->db->tx(function()use($actor,$current,$hash){
             $u=$this->db->one('SELECT password_hash,phone_verified_at FROM m_users WHERE id=? FOR UPDATE',[$actor['user_id']]);
-            if(!$u || !$u['phone_verified_at']){throw new Problem('PHONE_REQUIRED','ابتدا شماره همراه را تأیید کنید.',403);}
-            if($u['password_hash'] ? !Security::verifyPassword($current,$u['password_hash']) : ($actor['auth_method']!=='otp' || (int)$actor['auth_at']<time()-300)) {throw new Problem('REAUTH_REQUIRED','رمز فعلی یا ورود پیامکی تازه لازم است.',403);}
+            if(!$u){throw new Problem('ACCESS_DENIED','حساب در دسترس نیست.',403);}
+            if($u['password_hash'] ? !Security::verifyPassword($current,$u['password_hash']) : (!in_array($actor['auth_method'],['otp','google','eitaa'],true) || (int)$actor['auth_at']<time()-300)) {throw new Problem('REAUTH_REQUIRED','رمز فعلی یا ورود پیامکی تازه لازم است.',403);}
             $this->db->run('UPDATE m_users SET password_hash=?,updated_at=? WHERE id=?',[$hash,time(),$actor['user_id']]);
             $this->db->run('UPDATE m_auth_sessions SET revoked_at=? WHERE user_id=? AND realm=\'site\' AND id<>? AND revoked_at IS NULL',[time(),$actor['user_id'],$actor['session_id']]);
             $this->audit->add($actor['user_id'],'site','auth.password_changed');$this->audit->notify($actor['user_id'],'رمز حساب تغییر کرد','رمز حساب تغییر کرد و نشست‌های دیگر سایت بسته شدند.');

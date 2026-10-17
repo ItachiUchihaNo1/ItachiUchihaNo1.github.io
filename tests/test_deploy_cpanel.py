@@ -30,6 +30,14 @@ class FakeFTP:
     def delete(self,p):del self.files[p]
 
 class DeployTests(unittest.TestCase):
+    def test_incremental_plan_requires_a_successful_deployment_of_the_base(self):
+        self.assertIsNone(deploy.changed_paths('a'*40,'b'*40,lambda _: {'workflow_runs':[]}))
+    def test_incremental_plan_uses_only_complete_ancestor_comparison(self):
+        def fetch(path):return {'workflow_runs':[{'head_sha':'a'*40,'conclusion':'success'}]} if path.startswith('actions/') else {'status':'ahead','files':[{'filename':'morshedapp.ir/assets/app.css','status':'modified'},{'filename':'old.php','status':'removed'}]}
+        self.assertEqual(deploy.changed_paths('a'*40,'b'*40,fetch),{'morshedapp.ir/assets/app.css'})
+    def test_truncated_or_diverged_comparison_falls_back_to_full_plan(self):
+        for comparison in [{'status':'diverged','files':[]},{'status':'ahead','files':[{'filename':'file.php'}]*300}]:
+            self.assertIsNone(deploy.changed_paths('a'*40,'b'*40,lambda path: {'workflow_runs':[{'head_sha':'a'*40,'conclusion':'success'}]} if path.startswith('actions/') else comparison))
     def test_no_secret_runtime_or_traversal_can_enter_plan(self):
         for name in ['../x.php','/morshedapp.ir/x.php','morshed-core/config/local.php','morshed-core/storage/sessions/a.php','morshed-core/database/migrations/007.sql','morshed-core/.deploy/a.php','morshedapp.ir/.env','morshedapp.ir/../x.php','morshedapp.ir/evil\\x.php']:
             with self.subTest(name=name):self.assertFalse(deploy.allowed(name))

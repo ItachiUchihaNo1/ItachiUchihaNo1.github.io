@@ -37,6 +37,19 @@ def plan(root=ROOT):
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 
+def github_json(path):
+    request=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/ItachiUchihaNo1.github.io/'+path,headers={'Accept':'application/vnd.github+json','User-Agent':'Morshed-deploy'})
+    with urllib.request.urlopen(request,timeout=20) as response:return json.load(response)
+
+def changed_paths(base,commit,fetch=github_json):
+    if not re.fullmatch('[a-f0-9]{40}',base or ''):return None
+    runs=fetch('actions/workflows/deploy-cpanel.yml/runs?head_sha='+base+'&status=success&per_page=20')
+    if not any(r.get('head_sha')==base and r.get('conclusion')=='success' for r in runs.get('workflow_runs',[])):return None
+    comparison=fetch('compare/'+base+'...'+commit)
+    entries=comparison.get('files',[])
+    if comparison.get('status') not in ('ahead','identical') or len(entries)>=300:return None
+    return {item['filename'] for item in entries if item.get('status')!='removed'}
+
 class Publisher:
     def __init__(self,ftp,base,commit,recovery_commit=None):
         if not re.fullmatch(r'[a-f0-9]{40}',commit):raise ValueError('Invalid commit')
@@ -167,7 +180,18 @@ def main():
     ftp.connect(os.environ['DEPLOY_FTPS_HOST'],int(os.environ.get('DEPLOY_FTPS_PORT','21')))
     ftp.auth();ftp.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);ftp.prot_p();ftp.set_pasv(True);ftp.voidcmd('TYPE I')
     publisher=Publisher(ftp,os.environ.get('DEPLOY_FTPS_BASE','/'),commit,os.environ.get('DEPLOY_RECOVER_COMMIT'))
-    try:publisher.publish(files,smoke);print('DEPLOYED '+commit+'; public assets and pages verified. Runtime configuration and database preserved.')
+    selected=files
+    try:
+        release_path=publisher.base+'/morshedapp.ir/_release.json'
+        if publisher.exists(release_path):
+            previous=json.loads(publisher.read(release_path))
+            changed=changed_paths(previous.get('commit'),commit)
+            if changed is not None:
+                selected={name:data for name,data in files.items() if name in changed or name=='morshedapp.ir/_release.json'}
+                print('Verified successful base release; transferring '+str(len(selected))+' changed source files. Unchanged source, configuration and runtime files remain in place.',flush=True)
+    except Exception:
+        print('No verified incremental base; using the full reviewed source plan.',flush=True)
+    try:publisher.publish(selected,lambda _:smoke(files));print('DEPLOYED '+commit+'; public assets and pages verified. Runtime configuration and database preserved.')
     finally:ftp.close()
 
 if __name__=='__main__':

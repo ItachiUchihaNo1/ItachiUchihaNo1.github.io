@@ -23,7 +23,7 @@ final class EitaaInitDataVerifier
     }
 
     /** @return array{subject: string, auth_date: int, replay_key: string} */
-    public function verify(string $initData, int $now): array
+    public function verifyFields(string $initData, int $now): array
     {
         if ($initData === '' || strlen($initData) > 16384 || substr_count($initData, '&') > 32) {
             throw new \DomainException('Invalid identity assertion.');
@@ -59,6 +59,11 @@ final class EitaaInitDataVerifier
         if ($date > $now + 10 || $now - $date > $this->maxAge) {
             throw new \DomainException('Expired or future identity assertion.');
         }
+        return ['fields'=>$fields,'auth_date'=>$date,'replay_key'=>$hash];
+    }
+    public function verify(string $initData,int $now):array
+    {
+        $proof=$this->verifyFields($initData,$now);$fields=$proof['fields'];$date=$proof['auth_date'];$hash=$proof['replay_key'];
         try { $user = json_decode($fields['user'] ?? '', true, 16, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING); }
         catch (\JsonException $e) { throw new \DomainException('Invalid identity subject.'); }
         $id = is_array($user) ? ($user['id'] ?? null) : null;

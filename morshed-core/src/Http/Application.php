@@ -39,7 +39,7 @@ final class Application
                 try{$decoded=json_decode($body,false,16,JSON_THROW_ON_ERROR);}catch(\Throwable $e){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}
                 if(!is_object($decoded)){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}$this->input=(array)$decoded;
             }else{$this->input=$_POST;}
-            foreach(['phone','display_name','username','user_id','id','purpose','title','body','challenge_id'] as $key){if(is_string($this->input[$key]??null)){$this->view->old[$key]=$this->input[$key];}}
+            foreach(['login','phone','display_name','username','user_id','id','purpose','title','body','challenge_id'] as $key){if(is_string($this->input[$key]??null)){$this->view->old[$key]=$this->input[$key];}}
         }
     }
     private function secure():bool{return !empty($_SERVER['HTTPS'])&&strtolower((string)$_SERVER['HTTPS'])!=='off';}
@@ -69,20 +69,27 @@ final class Application
     private function json(mixed $data,int $status=200):void{http_response_code($status);header('Content-Type: application/json; charset=utf-8');echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);}
     private function success(string $route,array $data=['ok'=>true]):void
     {if($this->api){$this->json($data);}else{$_SESSION['flash']='عملیات با موفقیت انجام شد.';$this->redirect($route);}}
-    private function afterLogin():string{$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
+    private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if(!$u['password_hash']||!$this->accounts->username($uid)){return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
     private function issue(string $user,string $method,?string $admin=null):void
     {
         if($this->actor){$this->sessions->revoke($this->actor['user_id'],$this->realm,$this->actor['session_id']);}
-        $s=$this->sessions->issue($user,$this->realm,$method,$admin,$_SERVER['HTTP_USER_AGENT']??'');
+        $_SESSION['issued_user']=$user;$s=$this->sessions->issue($user,$this->realm,$method,$admin,$_SERVER['HTTP_USER_AGENT']??'');
         setcookie($this->cookie,$s['token'],['expires'=>$s['expires_at'],'path'=>'/','secure'=>$this->secure(),'httponly'=>true,'samesite'=>'Lax']);
         session_regenerate_id(true);$_SESSION['csrf']=bin2hex(random_bytes(32));
+    }
+    private function completedAccount():void
+    {
+        if($this->realm!=='site'||!$this->actor){return;}
+        $protected=in_array($this->path,['/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
+        if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
+        if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect('/account/complete');}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا نام کاربری و رمز عبور حساب را تکمیل کنید.',409);}
     }
     public function run():void
     {
         try{
             $product=new ProductController($this->db,$this->view,$this->actor,$this->realm,$this->api);
-            if($this->method==='POST'){$this->csrf();if(!$product->post($this->path,$this->input)){$this->post();}}
-            elseif($this->method==='GET'){if(!$product->get($this->path)){$this->get();}}
+            if($this->method==='POST'){$this->csrf();$this->completedAccount();if(!$product->post($this->path,$this->input)){$this->post();}}
+            elseif($this->method==='GET'){$this->completedAccount();if(!$product->get($this->path)){$this->get();}}
             else{throw new Problem('METHOD_NOT_ALLOWED','روش درخواست مجاز نیست.',405);}
         }catch(Problem $e){$this->error($e);}
     }
@@ -94,14 +101,14 @@ final class Application
             setcookie($this->cookie,'',['expires'=>1,'path'=>'/','secure'=>$this->secure(),'httponly'=>true,'samesite'=>'Lax']);session_regenerate_id(true);$_SESSION['csrf']=bin2hex(random_bytes(32));$this->success('/login');return;
         }
         if($this->path==='/auth/password'){
-            if($this->realm==='site'){$user=$this->accounts->passwordLogin($this->text('phone',32),$this->text('password',256),$ip);$this->issue($user,'password');$this->success($this->afterLogin());}
+            if($this->realm==='site'){$user=$this->accounts->passwordLogin(($this->text('login',64)?:$this->text('phone',32)),$this->text('password',256),$ip);$this->issue($user,'password');$this->success($this->afterLogin());}
             else{$a=$this->admin->login($this->text('username',64),$this->text('password',256),$ip);$this->issue($a['user_id'],'admin_password',$a['admin_id']);$this->success('/');}return;
         }
         if($this->realm==='admin'){$this->postAdmin($ip);return;}
         if($this->path==='/auth/eitaa/context'){
             if(!($this->config['eitaa']['enabled']??false)||!($this->config['eitaa']['live_verified']??false)){throw new Problem('PROVIDER_DISABLED','ورود با ایتا هنوز راه‌اندازی نشده است.',503);}
             $data=$this->text('init_data',16384);if($data===''){throw new Problem('INVALID_INPUT','داده ایتا دریافت نشد.');}
-            $_SESSION['eitaa_context']=['data'=>$data,'expires'=>time()+60];$this->json(['ok'=>true]);return;
+            if(!isset($_SESSION['eitaa_context'])||($_SESSION['eitaa_context']['expires']??0)<time()||!hash_equals($_SESSION['eitaa_context']['fingerprint']??'',hash('sha256',$data))){$proof=$this->external->captureEitaa($data,$ip);$_SESSION['eitaa_context']=['proof'=>$proof,'fingerprint'=>hash('sha256',$data),'expires'=>time()+900];}$this->json(['ok'=>true]);return;
         }
         if(in_array($this->path,['/auth/google/start','/auth/eitaa/start'],true)){
             $provider=$this->path==='/auth/google/start'?'google':'eitaa';$_SESSION['external_browser']??=bin2hex(random_bytes(32));
@@ -109,7 +116,7 @@ final class Application
             if($provider==='google'){if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'");header('Location: '.$f['url'],true,303);}}
             else{
                 $data=$this->text('init_data',16384);$cached=$_SESSION['eitaa_context']??null;unset($_SESSION['eitaa_context']);
-                if($data===''&&is_array($cached)&&($cached['expires']??0)>time()){$data=$cached['data'];}
+                if(is_array($cached)&&($cached['expires']??0)>time()&&isset($cached['proof'])&&($data===''||hash_equals($cached['fingerprint'],hash('sha256',$data)))){$r=$this->external->eitaaCaptured($f['state'],$cached['proof'],$_SESSION['external_browser'],$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
                 if($data!==''){$r=$this->external->eitaa($f['state'],$data,$_SESSION['external_browser'],$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
                 if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; script-src 'self' https://developer.eitaa.com; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");$this->view->page('تأیید حساب ایتا','eitaa',['state'=>$f['state']]);}}return;
         }
@@ -126,7 +133,9 @@ final class Application
         }
         $a=$this->requireActor();
         switch($this->path){
+            case '/me/eitaa/contact':$this->external->contact($a,$this->text('contact_data',16384),$ip);$this->success('/account');return;
             case '/me/identities/unlink':$this->external->unlink($a,$this->text('provider',16));$this->success('/account');return;
+            case '/account/complete':$this->accounts->complete($a,$this->text('username',64),$this->text('new_password',256),$this->text('current_password',256));$this->success($this->afterLogin());return;
             case '/me/profile':$this->accounts->profile($a['user_id'],$this->text('display_name',500));$this->success('/account');return;
             case '/me/password':$this->accounts->setPassword($a,$this->text('current_password',256),$this->text('new_password',256));$this->success('/account');return;
             case '/me/phone/request':$id=$this->accounts->requestCode($this->text('phone',32),'change_phone',$ip,$a,$this->text('current_password',256));$this->codeForm($id,'change_phone');return;
@@ -172,10 +181,11 @@ final class Application
         $a=$this->requireActor();
         switch($this->path){
             case '/me':$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at FROM m_users WHERE id=?',[$a['user_id']]);$this->json(['user'=>$u,'realm'=>'site']);return;
+            case '/account/complete':$u=$this->db->one('SELECT password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$this->view->page('تکمیل حساب','complete-account',['user'=>$u,'username'=>$this->accounts->username($a['user_id'])],$error);return;
             case '/account':case '/account/security':
                 $u=$this->db->one('SELECT display_name,phone,password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$legal=$this->legal->current();
                 $accepted=$legal&&$this->db->one('SELECT user_id FROM m_user_acceptances WHERE user_id=? AND version_id=?',[$a['user_id'],$legal['id']]);
-                $this->view->page('حساب من','account',['user'=>$u,'legal'=>$legal,'accepted'=>(bool)$accepted,'identities'=>$this->external->methods($a['user_id']),'isMentor'=>(bool)$this->db->one('SELECT user_id FROM m_mentors WHERE user_id=?',[$a['user_id']])],$error);return;
+                $this->view->page('حساب من','account',['username'=>$this->accounts->username($a['user_id']),'user'=>$u,'legal'=>$legal,'accepted'=>(bool)$accepted,'identities'=>$this->external->methods($a['user_id']),'isMentor'=>(bool)$this->db->one('SELECT user_id FROM m_mentors WHERE user_id=?',[$a['user_id']])],$error);return;
             case '/account/sessions':case '/me/sessions':$rows=$this->sessions->list($a['user_id'],'site');if($this->api){$this->json(['sessions'=>$rows]);}else{$this->view->page('نشست‌های فعال','sessions',['rows'=>$rows],$error);}return;
             case '/notifications':$rows=$this->db->all('SELECT id,title,body,created_at,read_at,category,destination FROM m_notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50',[$a['user_id']]);if($this->api){$this->json(['notifications'=>$rows]);}else{$this->view->page('اعلان‌ها','notifications',['rows'=>$rows],$error);}return;
             default:throw new Problem('FEATURE_UNAVAILABLE','این بخش هنوز در دسترس نیست.',503);
@@ -192,7 +202,10 @@ final class Application
         if($this->path==='/security'||$this->path==='/me/sessions'){$rows=$this->sessions->list($a['user_id'],'admin');if($this->api){$this->json(['sessions'=>$rows]);}else{$this->view->page('امنیت حساب مدیریت','admin-security',['rows'=>$rows],$error);}return;}
         if($this->path==='/'){
             $stats=[];foreach(['users'=>'m_users','admins'=>'m_admin_accounts','sessions'=>'m_auth_sessions','audit'=>'m_audit_logs'] as $key=>$table){$where=$key==='sessions'?' WHERE revoked_at IS NULL AND expires_at>'.time():'';$stats[$key]=(int)$this->db->run('SELECT COUNT(*) FROM '.$table.$where)->fetchColumn();}
-            $this->view->page('داشبورد مدیریت','admin-dashboard',['stats'=>$stats],$error);return;
+            foreach(['mentors'=>"SELECT COUNT(*) FROM m_mentors WHERE status='active'",'experiences'=>'SELECT COUNT(*) FROM m_experiences WHERE public_version_id IS NOT NULL','bookings'=>'SELECT COUNT(*) FROM m_bookings'] as $key=>$sql){$stats[$key]=(int)$this->db->run($sql)->fetchColumn();}
+            $canOperate=($a['admin_role']??'')==='system_admin';$daily=$canOperate?$this->db->all('SELECT FLOOR(created_at/86400) AS day,COUNT(*) AS total FROM m_bookings WHERE created_at>=? GROUP BY FLOOR(created_at/86400)',[strtotime('today UTC')-6*86400]):[];$counts=array_column($daily,'total','day');$trend=[];for($i=6;$i>=0;$i--){$day=(int)floor(time()/86400)-$i;$trend[]=['label'=>gmdate('m/d',$day*86400),'count'=>(int)($counts[$day]??0)];}
+            $states=$canOperate?$this->db->all('SELECT state,COUNT(*) AS total FROM m_bookings GROUP BY state'):[];$recent=$canOperate?$this->db->all('SELECT b.id,b.state,b.created_at,u.display_name AS user_name,m.display_name AS mentor_name FROM m_bookings b JOIN m_users u ON u.id=b.user_id JOIN m_users m ON m.id=b.mentor_id ORDER BY b.created_at DESC LIMIT 5'):[];
+            $this->view->page('داشبورد مدیریت','admin-dashboard',['canOperate'=>$canOperate,'stats'=>$stats,'trend'=>$trend,'bookingStates'=>$states,'recentBookings'=>$recent],$error);return;
         }
         $this->admin->system($a);
         switch($this->path){
@@ -216,7 +229,7 @@ final class Application
         if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/users/status'=>'/users','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/users/status'=>'/users','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());

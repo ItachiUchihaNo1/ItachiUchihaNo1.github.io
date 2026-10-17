@@ -21,7 +21,7 @@ final class TsmsSendOnlyGateway implements SmsGateway
         $phone = self::normalizePhone($phone);
         if (!preg_match('/^[0-9]{6}$/D', $code)) { throw new \InvalidArgumentException('Invalid login code format.'); }
         // Both explicit opt-ins are private deployment settings, not request parameters.
-        if (($this->config['enabled'] ?? false) !== true || ($this->config['https_post_confirmed'] ?? false) !== true) {
+        if (($this->config['enabled'] ?? false) !== true || ($this->config['https_transport_confirmed'] ?? $this->config['https_post_confirmed'] ?? false) !== true) {
             return new SmsSubmission('disabled');
         }
         $allow = $this->config['allowed_recipients'] ?? [];
@@ -41,7 +41,7 @@ final class TsmsSendOnlyGateway implements SmsGateway
             'username' => $this->config['username'], 'password' => $this->config['password'],
             'message' => "مرشد؛ کد ورود: " . $code . "\nاین کد را به دیگران ندهید.",
         ];
-        try { $response = $this->transport->postForm(self::ENDPOINT, $fields); }
+        try { $method=$this->config['method']??'POST';if(!in_array($method,['GET','POST'],true)){throw new \RuntimeException('Unsupported SMS transport.');}if($method==='GET'){if(!method_exists($this->transport,'getForm')){throw new \RuntimeException('SMS GET transport unavailable.');}$response=$this->transport->getForm(self::ENDPOINT,$fields);}else{$response=$this->transport->postForm(self::ENDPOINT, $fields);} }
         catch (\Throwable $e) { return new SmsSubmission('submission_uncertain'); }
         // A timeout/unknown response may already have sent the SMS. Never auto-retry here.
         if (!isset($response['http_status'], $response['body']) || !is_int($response['http_status']) ||

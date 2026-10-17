@@ -89,6 +89,7 @@ try:
     php_run('product.php')
     php_run('external.php')
     php_run('delivery.php')
+    php_run('tsms_gateway.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')
     replies=race(fixture['booking_race']);assert any(x.get('code')=='SLOT_UNAVAILABLE' for x in replies);ok('two concurrent reservation requests cannot consume the same capacity')
@@ -106,9 +107,9 @@ try:
     status,body,_=guest.post('/auth/eitaa/context',{'init_data':'forged'});assert status==503
     cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':'test-only-eitaa-token-123456'};config.write_text(json.dumps(cfg),encoding='utf-8')
     status,home,headers=guest.request('/');assert status==200 and 'developer.eitaa.com' in headers['Content-Security-Policy'] and 'eitaa-context' in home
-    status,body,_=guest.post('/auth/eitaa/context',{'init_data':'hash=forged'});assert status==200
+    status,body,_=guest.post('/auth/eitaa/context',{'init_data':'hash=forged'});assert status==401
     assert_status(guest,'/api/v1/me',401)
-    status,body,_=guest.post('/auth/eitaa/start',{'purpose':'login'});assert status==401 and 'INVALID_ASSERTION' in body
+    status,body,_=guest.post('/auth/eitaa/start',{'purpose':'login','init_data':'hash=forged'});assert status==401 and 'INVALID_ASSERTION' in body
     assert_status(guest,'/api/v1/me',401);ok('Eitaa launch context never authenticates and forged cached data cannot create a session')
     cfg.pop('eitaa');config.write_text(json.dumps(cfg),encoding='utf-8')
     assert_status(site,'/api/v1/me',401);assert_status(adminclient,'/api/v1/users',401);ok('both realms reject unauthenticated API access')
@@ -116,6 +117,9 @@ try:
     status,body,_=site.request('/api/v1/me/profile',[]);assert status==400 and json.loads(body)['error']['code']=='INVALID_JSON';ok('non-object JSON receives a safe structured validation error')
     status,body,_=site.post('/auth/password',{'phone':fixture['phone'],'password':fixture['password']});assert status==200,(status,body)
     status,body,_=site.request('/api/v1/me');assert json.loads(body)['user']['id']==fixture['user_id'];ok('real HTTP password login creates usable site session')
+    assert_status(site,'/api/v1/sessions',409)
+    status,body,_=site.post('/account/complete',{'username':'primary_test_user','current_password':fixture['password'],'new_password':fixture['password']});assert status==200,(status,body)
+    ok('incomplete account cannot use protected services before completing local credentials')
     sitecookie=next(c.value for c in site.jar if c.name=='morshed_dev_site')
     request=urllib.request.Request(cfg['origins']['admin']+'/index.php?r=%2Fapi%2Fv1%2Fme',headers={'Cookie':'morshed_dev_admin='+sitecookie})
     try:urllib.request.urlopen(request);raise AssertionError('Realm escalation accepted')
@@ -165,6 +169,7 @@ try:
     ok('every product administration page renders against live tables')
     assert_status(content,'/api/v1/mentors',403);assert_status(content,'/api/v1/support',403)
     assert_status(content,'/experiences',200);assert_status(content,'/taxonomy',200);assert_status(content,'/storefront',200)
+    html=assert_status(content,'/',200);assert 'dashboard-chart' not in html and 'آخرین درخواست‌های گفت‌وگو' not in html
     ok('content administrator can moderate content but cannot access system operations')
     for path in ['/api/v1/booking?id='+product['booking_id'],'/api/v1/session?id='+product['booking_id'],'/api/v1/ticket?id='+product['ticket_id']]:assert_status(site,path,404)
     assert_status(adminclient,'/api/v1/archive?id='+product['booking_id'],403)
@@ -173,6 +178,7 @@ try:
     mentorclient=Client(cfg['origins']['site']);ownerclient=Client(cfg['origins']['site'])
     for client,phone,password in [(mentorclient,product['mentor_phone'],product['mentor_password']),(ownerclient,product['owner_phone'],product['owner_password'])]:
         status,body,_=client.post('/auth/password',{'phone':phone,'password':password});assert status==200,(status,body)
+        status,body,_=client.post('/account/complete',{'username':'user_'+phone,'current_password':password,'new_password':password});assert status==200,(status,body)
     for path in ['/mentor','/mentor/experiences','/mentor/experience','/mentor/experience?id='+product['experience_id'],'/mentor/calendar','/sessions','/booking?id='+product['booking_id'],'/session?id='+product['booking_id']]:assert_status(mentorclient,path,200)
     ok('mentor account renders only its own real panel calendar experiences and sessions')
     status,body,_=mentorclient.post('/mentor/experience/save',{'title':'<img src=x onerror=alert(1)>','body':'آزمون متن پایدار','term_id':product['topic_id']});assert status==200,(status,body);created=json.loads(body)
@@ -236,6 +242,19 @@ try:
     html=assert_status(site,'/mentor/profile?id='+product['mentor_id'],200);assert assetid in html
     with site.opener.open(site.base+'/index.php?r=%2Fcontent%2Fasset&id='+assetid) as r:assert r.headers['Content-Type']=='image/png' and r.read()==image_bytes
     ok('portrait upload reuses owned content safely and requires renewed profile approval')
+    # Branding publication is explicit, role-controlled and independent of mentor evidence.
+    status,body,_=adminclient.request('/api/v1/csrf');brand_csrf=json.loads(body)['csrf'];brand_boundary='brand-test-'+secrets.token_hex(8)
+    brand_payload=(f'--{brand_boundary}\r\nContent-Disposition: form-data; name="csrf"\r\n\r\n{brand_csrf}\r\n--{brand_boundary}\r\nContent-Disposition: form-data; name="kind"\r\n\r\nfooter_logo\r\n--{brand_boundary}\r\nContent-Disposition: form-data; name="attachment"; filename="brand.png"\r\nContent-Type: image/png\r\n\r\n'.encode()+image_bytes+f'\r\n--{brand_boundary}--\r\n'.encode())
+    request=urllib.request.Request(adminclient.base+'/index.php?r=%2Fapi%2Fv1%2Fgeneral%2Fasset',data=brand_payload,headers={'Content-Type':'multipart/form-data; boundary='+brand_boundary})
+    with adminclient.opener.open(request) as response:brand_id=json.loads(response.read())['asset_id']
+    with guest.opener.open(guest.base+'/index.php?r=%2Fcontent%2Fasset&id='+brand_id) as response:assert response.read()==image_bytes
+    status,body,_=content.post('/general/save',{'footer_logo_link':'/about'});assert status==403
+    status,body,_=adminclient.post('/general/save',{'about_text':'درباره مرشد','support_phone':'09120691542','support_email':'mozafarijavad287@gmail.com','support_address':'','footer_text':'<script>unsafe-footer</script>','footer_logo_link':'/about','enamad_link':''});assert status==200,(status,body)
+    html=assert_status(guest,'/',200);assert '09120691542' in html and 'mozafarijavad287@gmail.com' in html and '&lt;script&gt;unsafe-footer&lt;/script&gt;' in html and '<script>unsafe-footer</script>' not in html and brand_id in html
+    status,body,_=adminclient.post('/general/asset',{'kind':'footer_logo','remove':'1'});assert status==200
+    assert_status(guest,'/api/v1/content/asset?id='+brand_id,404)
+    status,body,_=adminclient.post('/general/save',{'about_text':'درباره مرشد','support_phone':'09120691542','support_email':'mozafarijavad287@gmail.com','support_address':'','footer_text':'مرشد، جایی برای گفت‌وگو با صاحب تجربه.','footer_logo_link':'/','enamad_link':''});assert status==200
+    ok('admin branding upload publication removal and safe editable footer work with server role checks')
     dumpbin=server.parent/('mariadb-dump.exe' if os.name=='nt' else 'mariadb-dump')
     if dumpbin.exists():
         dbname=cfg['database']['dsn'].split('dbname=')[1].split(';')[0];dumpfile=scratch/'private-test-backup.sql'

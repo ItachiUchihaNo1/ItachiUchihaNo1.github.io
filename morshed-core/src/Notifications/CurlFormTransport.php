@@ -4,18 +4,19 @@ namespace Morshed\Notifications;
 
 final class CurlFormTransport implements FormTransport
 {
-    public function postForm(string $url, array $fields): array
+    public function postForm(string $url,array $fields):array{return $this->request($url,$fields,false);}
+    public function getForm(string $url,array $fields):array{return $this->request($url,$fields,true);}
+    private function request(string $url, array $fields,bool $query): array
     {
         if ($url !== TsmsSendOnlyGateway::ENDPOINT || !function_exists('curl_init')) {
             throw new \RuntimeException('SMS transport unavailable.');
         }
-        $ch = curl_init($url);
+        $payload=http_build_query($fields,'','&',PHP_QUERY_RFC3986);$ch = curl_init($url.($query?'?'.$payload:''));
         if ($ch === false) { throw new \RuntimeException('SMS transport unavailable.'); }
         $body = '';
         try {
             curl_setopt_array($ch, [
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => http_build_query($fields, '', '&', PHP_QUERY_RFC3986),
+                CURLOPT_POST => !$query,
                 CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded; charset=UTF-8', 'Accept: text/plain'],
                 CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 15,
                 CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
@@ -27,6 +28,7 @@ final class CurlFormTransport implements FormTransport
                     $body .= $chunk; return strlen($chunk);
                 },
             ]);
+            if(!$query){curl_setopt($ch,CURLOPT_POSTFIELDS,$payload);}
             if (curl_exec($ch) === false) {
                 // Do not include curl_error(), credentials, URL query or provider response in errors.
                 throw new \RuntimeException('SMS submission status is uncertain.');

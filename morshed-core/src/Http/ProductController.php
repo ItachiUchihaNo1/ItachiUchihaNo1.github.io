@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace Morshed\Http;
 use Morshed\Core\{Database,Audit,Problem};
-use Morshed\Product\{Content,Consultations,Operations,Policy,Delivery,PrivateFiles,ContentAssets};
+use Morshed\Product\{Content,Consultations,Operations,Policy,Delivery,PrivateFiles,ContentAssets,Branding};
 final class ProductController
 {
     private Content $content;private Consultations $consult;private Operations $ops;private Policy $policy;private string $currentPath='';
@@ -29,8 +29,8 @@ final class ProductController
         if($path==='/files/download'){$f=(new PrivateFiles($this->db,new Audit($this->db)))->download($this->actor(),$this->id());header('Content-Type: application/octet-stream');header('Content-Disposition: attachment; filename="attachment"; filename*=UTF-8\'\''.rawurlencode($f['display_name']));header('Content-Length: '.$f['byte_size']);header('X-Content-Type-Options: nosniff');readfile($f['path']);return true;}
         if($this->realm==='site'){
             switch($path){
-                case '/about':$this->page('درباره و تماس','product-about',['settings'=>array_column($this->db->all('SELECT setting_key,setting_value FROM m_public_settings'),'setting_value','setting_key')],$error);return true;
-                case '/':$this->page('گفت‌وگو با صاحب تجربه','product-home',['blocks'=>$this->content->store(null,true)],$error);return true;
+                case '/about':$this->page('درباره و تماس','product-about',['settings'=>Branding::settings($this->db)],$error);return true;
+                case '/':$this->page('گفت‌وگو با صاحب تجربه','product-home',['blocks'=>$this->content->store(null,true),'footerSettings'=>Branding::settings($this->db)],$error);return true;
                 case '/search':case '/mentors':$this->page('مرشدها','product-search',['kind'=>'mentors','rows'=>$this->content->mentors($_GET),'terms'=>$this->content->terms(),'mentorTotal'=>$this->content->mentorTotal($_GET),'experienceTotal'=>$this->content->experienceTotal($_GET)],$error);return true;
                 case '/experiences':$this->page('تجربه‌ها','product-search',['kind'=>'experiences','rows'=>$this->content->experiences($_GET),'terms'=>$this->content->terms(),'mentorTotal'=>$this->content->mentorTotal($_GET),'experienceTotal'=>$this->content->experienceTotal($_GET)],$error);return true;
                 case '/mentor/profile':$m=$this->content->mentor($this->id());$this->page($m['display_name'],'product-mentor',['mentor'=>$m,'experiences'=>$this->content->experiences(['mentor_id'=>$m['user_id']]),'terms'=>$this->db->all('SELECT t.title FROM m_mentor_terms mt JOIN m_terms t ON t.id=mt.term_id WHERE mt.mentor_id=? AND t.active=1',[$m['user_id']])],$error);return true;
@@ -65,7 +65,7 @@ final class ProductController
             case '/archives':$this->page('مجوزهای نظارت موردی','product-grants',['rows'=>$this->db->all('SELECT * FROM m_archive_grants ORDER BY created_at DESC'.$this->window())],$error);break;
             case '/archive':$id=$this->id();if($id===''){if($this->api){throw new Problem('INVALID_INPUT','شناسه رزرو لازم است.');}$this->page('آرشیو دارای مجوز','product-archive-lookup',[],$error);break;}$this->page('آرشیو تحت مجوز','product-session',['booking'=>['id'=>$id],'rows'=>$this->consult->archive($a,$id,(int)($_GET['after']??0)),'files'=>(new PrivateFiles($this->db,new Audit($this->db)))->listing($a,$id)],$error);break;
             case '/organizations':$this->page('سازمان‌ها و عضویت پایه','product-organizations',['rows'=>$this->db->all('SELECT o.*,(SELECT COUNT(*) FROM m_memberships m WHERE m.org_id=o.id) AS member_count FROM m_organizations o ORDER BY name'.$this->window()),'members'=>$this->db->all('SELECT m.org_id,m.user_id,u.display_name FROM m_memberships m JOIN m_users u ON u.id=m.user_id ORDER BY m.org_id LIMIT 200')],$error);break;
-            case '/general':$this->page('تنظیمات عمومی','product-general',['settings'=>array_column($this->db->all('SELECT setting_key,setting_value FROM m_public_settings'),'setting_value','setting_key')],$error);break;
+            case '/general':$this->page('تنظیمات عمومی','product-general',['settings'=>Branding::settings($this->db)],$error);break;
             case '/notification-templates':$this->page('قالب‌های اعلان','product-notifications',['mode'=>'templates','rows'=>$this->db->all('SELECT * FROM m_notification_templates ORDER BY created_at DESC'.$this->window())],$error);break;
             case '/notification-deliveries':$this->page('سوابق اعلان','product-notifications',['mode'=>'deliveries','rows'=>$this->db->all('SELECT * FROM m_notification_deliveries ORDER BY created_at DESC'.$this->window())],$error);break;
             case '/reports':$stats=[];foreach(['mentors'=>"SELECT COUNT(*) FROM m_mentors WHERE status='active'",'published_experiences'=>'SELECT COUNT(*) FROM m_experiences WHERE public_version_id IS NOT NULL','open_tickets'=>"SELECT COUNT(*) FROM m_tickets WHERE state='open'",'completed_sessions'=>"SELECT COUNT(*) FROM m_bookings WHERE state='completed'"] as $key=>$sql){$stats[$key]=(int)$this->db->run($sql)->fetchColumn();}$this->page('گزارش عملیاتی','product-reports',['stats'=>$stats,'feedback'=>$this->db->all('SELECT f.*,u.display_name FROM m_feedback f JOIN m_users u ON u.id=f.user_id ORDER BY f.created_at DESC'.$this->window()),'states'=>$this->db->all('SELECT state,COUNT(*) AS total FROM m_bookings GROUP BY state')],$error);break;
@@ -78,7 +78,7 @@ final class ProductController
     public function post(string $path,array $d):bool
     {
         $site=['/mentor/accept','/mentor/avatar','/mentor/evidence','/mentor/profile/save','/mentor/experience/save','/mentor/experience/submit','/mentor/calendar/settings','/mentor/calendar/rule','/mentor/calendar/remove','/mentor/calendar/exception','/bookings/create','/booking/action','/booking/propose','/booking/answer','/session/message','/session/files','/support/create','/ticket/reply','/feedback'];
-        $admin=['/mentors/invite','/mentors/status','/taxonomy/save','/experience/review','/experience/unpublish','/storefront/save','/storefront/publish','/bookings/internal','/booking/action','/ticket/reply','/archives/grant','/archives/revoke','/organizations/save','/organizations/member','/general/save','/notification-templates/create','/notification-deliveries/send'];
+        $admin=['/mentors/invite','/mentors/status','/taxonomy/save','/experience/review','/experience/unpublish','/storefront/save','/storefront/publish','/bookings/internal','/booking/action','/ticket/reply','/archives/grant','/archives/revoke','/organizations/save','/organizations/member','/general/save','/general/asset','/notification-templates/create','/notification-deliveries/send'];
         if(!in_array($path,$this->realm==='site'?$site:$admin,true)){return false;}
         $a=$this->actor();$result=[];$back='/';$id=$this->value($d,'id');$adminRealm=$this->realm==='admin';
         foreach($d as $k=>$v){if(is_string($k)&&is_string($v)&&!str_contains($k,'password')&&!in_array($k,['csrf','token','code'],true)){$this->view->old[$k]=$v;}}
@@ -105,6 +105,7 @@ final class ProductController
                 case '/booking/propose':$result=['proposal_id'=>$this->consult->propose($a,$id,Policy::integer($d['starts_at']??'',1,4102444800))];break;
                 case '/booking/answer':$this->consult->answerProposal($a,$this->value($d,'proposal_id'),($d['accept']??'0')==='1');break;
                 case '/session/files':$result=['file_id'=>(new PrivateFiles($this->db,new Audit($this->db)))->upload($a,$id,$_FILES['attachment']??[])];break;
+                case '/general/asset':$kind=$this->value($d,'kind');Policy::choice($kind,['footer_logo','enamad']);$asset=($d['remove']??'')==='1'?'':(new ContentAssets($this->db,new Audit($this->db)))->upload($a,$_FILES['attachment']??[],false,true);Branding::asset($this->db,new Audit($this->db),$a,$kind,$asset);$result=['asset_id'=>$asset];break;
                 case '/general/save':(new Delivery($this->db,new Audit($this->db)))->settings($a,$d);break;
                 case '/notification-templates/create':$result=['id'=>(new Delivery($this->db,new Audit($this->db)))->template($a,$d)];break;
                 case '/notification-deliveries/send':$result=['notification_id'=>(new Delivery($this->db,new Audit($this->db)))->send($a,$d)];break;

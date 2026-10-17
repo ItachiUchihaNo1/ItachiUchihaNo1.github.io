@@ -1,0 +1,3 @@
+<section class="card narrow section"><h1>تکمیل حساب مرشد</h1><p class="muted">برای ادامه، نام کاربری و رمز عبور حسابت را تنظیم کن. با این اطلاعات از دستگاه‌های دیگر هم می‌توانی وارد شوی.</p>
+<?= $this->start('/account/complete') ?><?= $this->field('username','نام کاربری انگلیسی','text',$username??'') ?><p class="small muted">۴ تا ۳۲ حرف انگلیسی، عدد یا زیرخط؛ شروع با حرف.</p>
+<?php if($user['has_password']): ?><?= $this->field('current_password','رمز فعلی','password') ?><?php endif; ?><?= $this->field('new_password','رمز عبور، حداقل ۱۲ نویسه','password') ?><button class="primary full">ذخیره و ادامه</button></form><a class="textlink" href="<?= $this->h($this->url('/')) ?>">بازگشت به ویترین</a></section>

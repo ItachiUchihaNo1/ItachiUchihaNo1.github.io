@@ -8,7 +8,7 @@ return [
     'pretty_urls' => false, // Works through index.php?r=... without Apache rewrite.
     'database' => ['dsn'=>'mysql:host=localhost;dbname=CPANEL_STAGING_DB;charset=utf8mb4','user'=>'','password'=>''],
     'setup' => ['enabled'=>false,'token_sha256'=>''],
-    'sms' => ['enabled'=>false,'https_post_confirmed'=>false,'environment'=>'staging',
+    'sms' => ['enabled'=>false,'https_transport_confirmed'=>false,'method'=>'GET','environment'=>'staging',
         'allowed_recipients'=>[],'username'=>'','password'=>'','sender'=>''],
     'google'=>['enabled'=>false,'live_verified'=>false,'client_id'=>'','client_secret'=>'','redirect_uri'=>'https://morshedapp.ir/index.php?r=%2Fauth%2Fgoogle%2Fcallback'],
     'eitaa'=>['enabled'=>false,'live_verified'=>false,'app_token'=>''],

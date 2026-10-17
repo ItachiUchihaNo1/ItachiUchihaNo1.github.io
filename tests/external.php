@@ -41,4 +41,27 @@ $http->eitaa=false;$f=$ext->begin('eitaa','login',null,$browser,'external-test')
 $f=$ext->begin('eitaa','login',null,$browser,'external-test');check('Eitaa stale assertion is refused',fn()=>rejects('INVALID_ASSERTION',fn()=>$ext->eitaa($f['state'],initData('111222333',time()-120),$browser,null,'127.0.0.1')));
 $ext->unlink($a,'google');check('disconnecting provider preserves other method and revokes removed-provider sessions',function()use($ext,$uid,$sessions,$session){eq(array_column($ext->methods($uid),'provider'),['eitaa']);eq($sessions->resolve($session['token'],'site'),null);});
 $disabled=new ExternalAccounts($db,$audit,$rate,$http,$cfg);check('missing real provider configuration fails closed',fn()=>rejects('PROVIDER_DISABLED',fn()=>$disabled->begin('google','login',null,$browser,'external-test')));
+$localSession=$sessions->issue($second['user_id'],'site','google');$localActor=$sessions->resolve($localSession['token'],'site');
+$accounts->complete($localActor,'Google_Person','Independent-Device-Password-984!');
+check('Google account can set local credentials without claiming phone ownership',function()use($accounts,$db,$second){eq($accounts->passwordLogin('GOOGLE_PERSON','Independent-Device-Password-984!','local-username-test'),$second['user_id']);eq($db->run('SELECT phone_verified_at FROM m_users WHERE id=?',[$second['user_id']])->fetchColumn(),null);});
+check('local username is excluded from external provider methods',fn()=>eq(array_column($ext->methods($second['user_id']),'provider'),['google']));
+check('credential changes require the current password once configured',fn()=>rejects('REAUTH_REQUIRED',fn()=>$accounts->complete($localActor,'google_person','Changed-Device-Password-582!','wrong-password')));
+$freshSession=$sessions->issue($uid,'site','eitaa');$freshActor=$sessions->resolve($freshSession['token'],'site');
+check('username ownership collision cannot merge separate accounts',fn()=>rejects('USERNAME_TAKEN',fn()=>$accounts->complete($freshActor,'google_person','Another-Device-Password-481!')));
+$db->run('UPDATE m_auth_sessions SET auth_at=? WHERE id=?',[time()-1000,$freshActor['session_id']]);
+check('initial local credentials require a recent authenticated session',fn()=>rejects('REAUTH_REQUIRED',fn()=>$accounts->complete($freshActor,'different_person','Another-Device-Password-481!')));
+$db->run('UPDATE m_auth_sessions SET auth_at=? WHERE id=?',[time(),$freshActor['session_id']]);$freshActor=$sessions->resolve($freshSession['token'],'site');
+function contactData(string $subject,string $phone):string{global $settings;$fields=['auth_date'=>(string)time(),'contact'=>json_encode(['user_id'=>$subject,'phone_number'=>$phone])];ksort($fields);$pairs=[];foreach($fields as $key=>$value){$pairs[]=$key.'='.$value;}$secret=hash_hmac('sha256',$settings['eitaa']['app_token'],'WebAppData',true);$fields['hash']=hash_hmac('sha256',implode("\n",$pairs),$secret);return http_build_query($fields,'','&',PHP_QUERY_RFC3986);}
+$contact=contactData('123456789','09126667788');
+check('modified Eitaa contact cannot verify a phone',fn()=>rejects('INVALID_ASSERTION',fn()=>$ext->contact($freshActor,str_replace('09126667788','09126667789',$contact),'contact-test')));
+check('signed contact must match the Eitaa identity linked to this account',fn()=>rejects('IDENTITY_MISMATCH',fn()=>$ext->contact($freshActor,contactData('999888777','09126667788'),'contact-test')));
+$ext->contact($freshActor,$contact,'contact-test');
+check('verified signed contact binds the phone to the same internal account',fn()=>eq($db->run('SELECT phone FROM m_users WHERE id=?',[$uid])->fetchColumn(),'09126667788'));
+check('signed contact cannot be replayed',fn()=>rejects('ASSERTION_REPLAY',fn()=>$ext->contact($freshActor,$contact,'contact-test')));
+$beforeCapture=(int)$db->run('SELECT COUNT(*) FROM m_users')->fetchColumn();$captured=$ext->captureEitaa(initData('777888999',time()),'capture-test');
+check('verified launch context alone never creates an account',fn()=>eq((int)$db->run('SELECT COUNT(*) FROM m_users')->fetchColumn(),$beforeCapture));
+$captureFlow=$ext->begin('eitaa','login',null,$browser,'capture-test');$capturedLogin=$ext->eitaaCaptured($captureFlow['state'],$captured,$browser,null);
+check('explicit login consumes captured proof after public browsing',fn()=>eq($db->run("SELECT subject FROM m_auth_identities WHERE user_id=? AND provider='eitaa'",[$capturedLogin['user_id']])->fetchColumn(),'777888999'));
+$replayFlow=$ext->begin('eitaa','login',null,$browser,'capture-test');
+check('captured launch proof cannot be reused for another login',fn()=>rejects('ASSERTION_REPLAY',fn()=>$ext->eitaaCaptured($replayFlow['state'],$captured,$browser,null)));
 echo "EXTERNAL RESULT: $passed passed, $failed failed\n";exit($failed?1:0);

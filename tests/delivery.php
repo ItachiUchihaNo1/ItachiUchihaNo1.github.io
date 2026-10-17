@@ -14,6 +14,13 @@ check('notification delivery commits recipient content and delivery record toget
 check('notification retry cannot create duplicate delivery',fn()=>eq($service->send($a,$d),$id));
 check('notification idempotency key rejects altered content',fn()=>rejects('IDEMPOTENCY_CONFLICT',fn()=>$service->send($a,array_replace($d,['message'=>'متفاوت']))));
 $service->settings($a,['about_text'=>'درباره آزمون','support_email'=>'support@example.test','support_phone'=>'']);
+check('content administrator cannot change public footer information',fn()=>rejects('ACCESS_DENIED',fn()=>$service->settings($ca,['footer_text'=>'تغییر غیرمجاز'])));
+$service->settings($a,['about_text'=>'درباره آزمون','support_email'=>'support@example.test','support_phone'=>'','footer_text'=>'گفت‌وگو با صاحب تجربه','support_address'=>'نشانی آزمون']);
+check('footer introduction and address persist in shared public settings',function()use($db){eq($db->run("SELECT setting_value FROM m_public_settings WHERE setting_key='footer_text'")->fetchColumn(),'گفت‌وگو با صاحب تجربه');eq($db->run("SELECT setting_value FROM m_public_settings WHERE setting_key='support_address'")->fetchColumn(),'نشانی آزمون');});
+$service->settings($a,['about_text'=>'درباره آزمون','support_email'=>'support@example.test','support_phone'=>'']);
+check('older settings submissions preserve new footer fields',fn()=>eq($db->run("SELECT setting_value FROM m_public_settings WHERE setting_key='support_address'")->fetchColumn(),'نشانی آزمون'));
+check('footer links reject executable and protocol-relative destinations',function(){foreach(['javascript:alert(1)','//evil.example','https://name:password@example.test','/path\\evil'] as $link){rejects('INVALID_INPUT',fn()=>Morshed\Product\Branding::link($link));}});
+check('footer links allow explicit HTTPS and local paths',function(){eq(Morshed\Product\Branding::link('https://example.test/verify'),'https://example.test/verify');eq(Morshed\Product\Branding::link('/about'),'/about');});
 check('public settings reject invalid email',fn()=>rejects('INVALID_INPUT',fn()=>$service->settings($a,['support_email'=>'invalid-email'])));
 check('public settings atomic failure preserves previously stored values',fn()=>eq($db->run("SELECT setting_value FROM m_public_settings WHERE setting_key='about_text'")->fetchColumn(),'درباره آزمون'));
 $logo=__DIR__.'/../morshedapp.ir/assets/morshed-logo.png';$files=new PrivateFiles($db,$audit);
