@@ -1,0 +1,11 @@
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const {webcrypto,createHash}=require('node:crypto');
+const html=fs.readFileSync(path.join(__dirname,'../tools/create-keys-offline.html'),'utf8');
+const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const elements=Object.fromEntries(['generate','app','token','hash','status'].map(k=>[k,{value:'',textContent:'',addEventListener:(_,fn)=>{elements[k].callback=fn;}}]));
+vm.runInNewContext(script,{crypto:webcrypto,TextEncoder,document:{getElementById:id=>elements[id]}});
+(async()=>{await elements.generate.callback();const a=elements.app.value,t=elements.token.value;
+if(!/^[a-f0-9]{64}$/.test(a)||!/^[a-f0-9]{64}$/.test(t)||a===t)throw Error('Invalid independent keys');
+if(elements.hash.value!==createHash('sha256').update(t).digest('hex'))throw Error('Invalid token digest');
+await elements.generate.callback();if(elements.app.value===a||elements.token.value===t)throw Error('Keys reused');
+console.log('PASS independent random application/install keys and exact SHA256');console.log('PASS fresh keys on repeated action');console.log('LIMIT: Node WebCrypto/DOM stub, not actual browser testing.');})().catch(e=>{console.error(e.message);process.exitCode=1;});

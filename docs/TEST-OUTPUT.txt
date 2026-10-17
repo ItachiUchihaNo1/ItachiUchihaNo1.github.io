@@ -1,0 +1,173 @@
+DATABASE TEST ENGINE: 10.11.14-MariaDB
+PASS migration applied to empty local database
+PASS two concurrent initial-admin requests produce one administrator
+PASS bootstrap is permanently locked after concurrent initialization
+PASS admin session cannot authenticate on site
+PASS admin username alone cannot grant entry
+PASS site password is not an admin credential
+PASS OTP creates exactly one account with verified phone
+PASS site token cannot authenticate on admin
+PASS consumed OTP cannot be reused
+PASS first password requires a freshly verified OTP session
+PASS password is securely hashed and authenticates
+PASS profile fields do not update roles
+PASS site actor cannot call core legal publishing
+PASS failed OTP attempts are durably committed
+PASS five wrong codes lock even the correct code
+PASS expired OTP is refused
+PASS reset revokes all existing site sessions
+PASS user reset cannot invalidate unrelated admin realm
+PASS cannot revoke another user session by id
+PASS password change requires the existing password
+PASS verified number already owned by another account is not merged
+PASS content admin denied user and role administration
+PASS content admin denied publishing legal text in core
+PASS admin operations require current admin password
+PASS last active system admin cannot block itself
+PASS role changes invalidate target admin sessions
+PASS blocking an account invalidates its site session
+PASS legal draft does not become public automatically
+PASS legal draft leaves published version unchanged
+PASS acceptance cannot silently accept a newer legal version
+PASS old accepted legal version remains traceable
+PASS recording legal publication remains absent
+PASS rate limit remains enforced after rejected operation
+PASS audit stores no submitted password or OTP field
+PASS successful phone change keeps stable user ID and revokes old site session
+PASS old reset proof cannot reset a different account after phone reassignment
+PASS Persian phone and OTP digits are accepted without changing identity
+PASS bcrypt cannot accept a longer password with the same 72-byte prefix
+PASS expired session cannot authenticate
+PASS admin password rotation revokes its admin sessions only
+PASS phone-change proof is bound to its issuing realm
+PASS proved admin phone lets site login reuse the same internal account
+RESULT: 40 passed, 0 failed
+PASS issue requires an existing active topic
+PASS site actor cannot impersonate administrator for mentor creation
+PASS content administrator cannot activate or invite mentors
+PASS invited mentor is not publicly visible
+PASS mentor cannot be activated before accepting invitation
+PASS invitation requires acceptance of current base terms
+PASS mentor query combines Persian normalization and topic filter
+PASS draft experience cannot be read publicly
+PASS another mentor cannot edit experience by changing ID
+PASS approved experience is public
+PASS new draft retains old public version
+PASS stale edit cannot overwrite a newer draft
+PASS requesting corrections retains the approved public version
+PASS approval atomically switches the public pointer
+PASS store draft stays private
+PASS published store resolves only public content
+PASS scheduled store block is hidden before start
+PASS store previous version can be restored
+PASS unpublishing removes manual store content too
+PASS slots derive from weekly rule duration and buffer
+PASS weekly rules cannot overlap
+PASS holiday eliminates available slots
+PASS public reservation remains closed at domain layer
+PASS same reservation retry returns identical booking
+PASS reused reservation key with changed payload is rejected
+PASS pending reservation holds slot
+PASS unrelated user cannot read booking
+PASS requester cannot approve their own pending booking
+PASS time proposal preserves existing confirmed slot
+PASS proposer cannot accept own proposal
+PASS acceptance rechecks proposed slot against intervening reservation
+PASS failed time change preserves confirmed original slot
+PASS counterparty acceptance updates booking time
+PASS expired request releases held capacity
+PASS text session cannot start before recording policy is approved
+PASS each participant must consent before any text transmission
+PASS message is committed before acknowledgment
+PASS message retry cannot duplicate durable text
+PASS message key cannot be reused for a different body
+PASS unrelated account cannot read private archive
+PASS system administrator has no implicit archive access
+PASS storage failure rolls back message and produces no ACK
+PASS ticket ownership is checked on reads and replies
+PASS content administrator cannot browse support cases
+PASS grant requires independent approver and reviewer
+PASS case grant permits only designated reviewer
+PASS expired archive grant cannot be used
+PASS revoked archive grant cannot be used
+PASS closed ticket cannot be appended by owner
+PASS feedback belongs to recipient of a completed session
+PASS feedback cannot be duplicated
+PASS organization membership is idempotent
+PASS organization membership can be revoked
+PASS mentor can pause intake without hiding their public profile
+PASS minimum lead time is applied by server
+PASS organizational scope cannot be bypassed by internal reservation operation
+PASS active shared organization permits eligible reservation
+PASS daily capacity limits additional nonoverlapping slots
+PRODUCT RESULT: 58 passed, 0 failed
+PASS Google RS256 signature and issuer audience nonce time are validated
+PASS Google rejects invalid iss
+PASS Google rejects invalid aud
+PASS Google rejects invalid nonce
+PASS Google rejects invalid exp
+PASS Google rejects invalid iat
+PASS Google refuses algorithm substitution
+PASS Google refuses unsigned JWT
+PASS Google creates stable internal ID without verifying a phone
+PASS Google repeated login reuses subject-bound account
+PASS same unverified email never merges accounts
+PASS external state is one-use
+PASS external state is bound to initiating browser
+PASS linking an identity owned by another account is refused
+PASS last usable login method cannot be disconnected
+PASS link requires recent proof of current account
+PASS provider reauthentication refreshes existing session after subject proof
+PASS Eitaa signed proof links to authenticated internal account
+PASS Eitaa assertion cannot be replayed through a new browser flow
+PASS Eitaa rejects modified identity without matching signature
+PASS Eitaa official verify refusal blocks login even with valid local HMAC
+PASS Eitaa stale assertion is refused
+PASS disconnecting provider preserves other method and revokes removed-provider sessions
+PASS missing real provider configuration fails closed
+EXTERNAL RESULT: 24 passed, 0 failed
+PASS notification template rejects executable or unknown placeholders
+PASS content administrator cannot send account notifications
+PASS notification delivery commits recipient content and delivery record together
+PASS notification retry cannot create duplicate delivery
+PASS notification idempotency key rejects altered content
+PASS public settings reject invalid email
+PASS public settings atomic failure preserves previously stored values
+PASS real image MIME dimensions and size are inspected
+PASS image bytes with executable extension are refused
+PASS file names cannot include traversal
+PASS fabricated non-HTTP upload cannot be moved into private storage
+DELIVERY RESULT: 11 passed, 0 failed
+PASS two concurrent OTP verifications consume code only once
+PASS two concurrent reservation requests cannot consume the same capacity
+PASS both realms reject unauthenticated API access
+PASS POST without CSRF is rejected
+PASS non-object JSON receives a safe structured validation error
+PASS real HTTP password login creates usable site session
+PASS copying site auth token into admin cookie cannot escalate access
+PASS site CSRF token is invalid in the admin realm
+PASS foreign Origin cannot mutate an authenticated profile
+PASS all implemented admin pages render using live database
+PASS content admin denied system-only API operations
+PASS profile ignores injected ownership/role and escapes stored HTML
+PASS booking media archive external auth and recording publication remain server-blocked
+PASS disabled SMS cannot fake successful code delivery
+PASS auth and CSRF cookies are HttpOnly and host-only in local test mode
+PASS login form labels have unique input IDs
+PASS private responses disable cache and restrict framing
+PASS unconfigured Host is rejected before account access
+PASS both public roots serve local Vazirmatn font
+PASS public home search mentor profile and experience use published database content
+PASS every product administration page renders against live tables
+PASS content administrator can moderate content but cannot access system operations
+PASS ownership and explicit archive grants protect actual product HTTP routes
+PASS mentor account renders only its own real panel calendar experiences and sessions
+PASS HTTP experience draft submission moderation publication and stored-XSS escaping work end to end
+PASS real external-auth routes stay disabled without verified provider configuration
+PASS HTTP storage failure preserves message text and retry acknowledges exactly one durable message
+PASS real multipart upload private storage integrity and authorized download pass without exposing files publicly
+PASS public evidence becomes readable only with its approved version and disappears on unpublication
+PASS portrait upload reuses owned content safely and requires renewed profile approval
+PASS local database backup restores every table exactly and invalidates snapshot authentication
+PASS combined fresh installer imports successfully with all schema migrations
+HTTP/RACE RESULT: 33 checks passed

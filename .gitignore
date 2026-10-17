@@ -1,0 +1,6 @@
+morshed-core/config/local.php
+morshed-core/storage/*
+!morshed-core/storage/.gitkeep
+*.log
+.env
+work/

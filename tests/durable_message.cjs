@@ -1,0 +1,13 @@
+/* Tests the delivered browser script with network/storage failures; no business storage mock is shipped to the site. */
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),{webcrypto}=require('node:crypto');
+const script=fs.readFileSync(require('node:path').join(__dirname,'../morshedapp.ir/assets/product.js'),'utf8');
+function fixture(fetch){let submit;const rows=[];const status={textContent:''};const button={disabled:true,removeAttribute(){}};const form={dataset:{apiUrl:'/api/v1/session/message'},elements:{body:{value:'پیام مهم'},client_key:{value:'original-request-key'},csrf:{value:'csrf'},id:{value:'booking'}},addEventListener(name,fn){if(name==='submit')submit=fn;},querySelectorAll(){return [button];}};
+const doc={querySelectorAll(){return [];},querySelector(selector){return selector==='form[data-durable-message]'?form:null;},getElementById(id){return id==='message-status'?status:id==='durable-messages'?{append(node){rows.push(node);}}:null;},createElement(){return {append(){},className:'',textContent:''};}};
+vm.runInNewContext(script,{window:{fetch,AbortController,crypto:webcrypto},fetch,AbortController,crypto:webcrypto,document:doc,navigator:{onLine:true},setTimeout,clearTimeout,Intl,console});return {form,status,rows,submit:()=>submit({preventDefault(){}})};}
+(async()=>{
+let f=fixture(async()=>{throw new Error('Network unavailable');});await f.submit();assert.equal(f.form.elements.body.value,'پیام مهم');assert.equal(f.form.elements.client_key.value,'original-request-key');assert.equal(f.rows.length,0);console.log('PASS browser retains body and idempotency key on network loss');
+f=fixture(async()=>({ok:false,json:async()=>({error:{code:'STORAGE_UNAVAILABLE',message:'ذخیره انجام نشد'}})}));await f.submit();assert.equal(f.form.elements.body.value,'پیام مهم');assert.equal(f.rows.length,0);console.log('PASS browser does not mark storage rejection as sent');
+f=fixture(async()=>({ok:true,json:async()=>({ok:true,id:42,body:'پیام مهم'})}));await f.submit();assert.equal(f.form.elements.body.value,'');assert.notEqual(f.form.elements.client_key.value,'original-request-key');assert.equal(f.rows.length,1);console.log('PASS browser clears only after matching durable server acknowledgment');
+f=fixture(async()=>({ok:true,json:async()=>({ok:true,id:42,body:'different body'})}));await f.submit();assert.equal(f.form.elements.body.value,'پیام مهم');assert.equal(f.rows.length,0);console.log('PASS mismatched acknowledgment preserves the pending message');
+console.log('BROWSER MESSAGE RESULT: 4 passed, 0 failed');
+})().catch(e=>{console.error(e);process.exit(1);});

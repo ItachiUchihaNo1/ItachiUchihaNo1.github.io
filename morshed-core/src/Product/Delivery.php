@@ -1,0 +1,18 @@
+<?php
+declare(strict_types=1);
+namespace Morshed\Product;
+use Morshed\Core\{Database,Security,Audit,Problem};
+final class Delivery
+{
+    public function __construct(private Database $db,private Audit $audit){}
+    private function write(array $a,callable $fn):mixed{return $this->db->tx(function()use($a,$fn){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');(new Policy($this->db))->admin($a,true);return $fn();});}
+    public function template(array $a,array $d):string
+    {return $this->write($a,function()use($a,$d){$name=Policy::text($d['name']??'',120);$title=Policy::text($d['title']??'',180);$body=Policy::text($d['body']??'',12000);preg_match_all('/\{([^{}]+)\}/u',$title.$body,$matches);foreach($matches[1] as $variable){if(!in_array($variable,['display_name','message'],true)){throw new Problem('INVALID_VARIABLE','فقط متغیرهای display_name و message مجازند.');}}
+        $id=Security::id();$this->db->run('INSERT INTO m_notification_templates VALUES(?,?,?,?,?,?)',[$id,$name,$title,$body,$a['user_id'],time()]);$this->audit->add($a['user_id'],'admin','notification.template_created',$id);return $id;});}
+    public function send(array $a,array $d):string
+    {return $this->write($a,function()use($a,$d){$uid=Policy::text($d['user_id']??'',32);$tid=Policy::text($d['template_id']??'',32);$key=Policy::text($d['request_key']??'',64,12);$message=Policy::text($d['message']??'',6000,0);$payload=hash('sha256',$tid.':'.$message);$old=$this->db->one('SELECT notification_id,template_id,payload_sha256 FROM m_notification_deliveries WHERE user_id=? AND request_key=?',[$uid,$key]);if($old){if($old['template_id']!==$tid||!hash_equals($old['payload_sha256'],$payload)){throw new Problem('IDEMPOTENCY_CONFLICT','شناسه درخواست برای قالب دیگری استفاده شده است.',409);}return $old['notification_id'];}
+        $t=$this->db->one('SELECT * FROM m_notification_templates WHERE id=?',[$tid]);$u=$this->db->one("SELECT display_name FROM m_users WHERE id=? AND status='active'",[$uid]);if(!$t||!$u){throw new Problem('NOT_FOUND','قالب یا کاربر فعال پیدا نشد.',404);}$vars=['{display_name}'=>$u['display_name'],'{message}'=>$message];$title=strtr($t['title'],$vars);$body=strtr($t['body'],$vars);if(preg_match_all('/./us',$title)>180||strlen($body)>20000){throw new Problem('INVALID_INPUT','متن نهایی اعلان بیش از حد طولانی است.');}
+        $nid=Security::id();$this->db->run('INSERT INTO m_notifications(id,user_id,title,body,created_at) VALUES(?,?,?,?,?)',[$nid,$uid,$title,$body,time()]);$this->db->run('INSERT INTO m_notification_deliveries(id,template_id,user_id,notification_id,request_key,payload_sha256,created_at) VALUES(?,?,?,?,?,?,?)',[Security::id(),$tid,$uid,$nid,$key,$payload,time()]);$this->audit->add($a['user_id'],'admin','notification.in_app_stored',$nid);return $nid;});}
+    public function settings(array $a,array $d):void
+    {$this->write($a,function()use($a,$d){foreach(['about_text'=>4000,'support_email'=>180,'support_phone'=>32] as $key=>$max){$value=Policy::text($d[$key]??'', $max,0);if($key==='support_email'&&$value!==''&&!filter_var($value,FILTER_VALIDATE_EMAIL)){throw new Problem('INVALID_INPUT','ایمیل پشتیبانی معتبر نیست.');}$this->db->run('INSERT INTO m_public_settings VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE setting_value=?,updated_by=?,updated_at=?',[$key,$value,$a['user_id'],time(),$value,$a['user_id'],time()]);}$this->audit->add($a['user_id'],'admin','settings.public_saved');});}
+}

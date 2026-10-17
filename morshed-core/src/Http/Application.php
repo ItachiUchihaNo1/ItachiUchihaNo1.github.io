@@ -1,0 +1,214 @@
+<?php
+declare(strict_types=1);
+namespace Morshed\Http;
+use Morshed\Core\{Database,RateLimiter,Audit,Problem};
+use Morshed\Identity\{Accounts,Sessions,ExternalAccounts,ProviderHttp};
+use Morshed\Access\Administration;
+use Morshed\Legal\Documents;
+use Morshed\Notifications\{TsmsSendOnlyGateway,CurlFormTransport};
+final class Application
+{
+    private Database $db;private Accounts $accounts;private Sessions $sessions;private Administration $admin;private Documents $legal;private View $view;
+    private ExternalAccounts $external;private ?array $actor=null;private array $input=[];private string $path;private bool $api=false;private string $cookie;private string $method;
+    public function __construct(private array $config,private string $realm)
+    {
+        if(!in_array($realm,['site','admin'],true)){throw new \LogicException('Unknown realm.');}
+        $this->transport();
+        $csrfName=$this->secure()?'__Host-morshed-csrf-'.$realm:'morshed_dev_csrf_'.$realm;
+        $this->cookie=$this->secure()?'__Host-morshed-'.$realm:'morshed_dev_'.$realm;
+        ini_set('session.use_strict_mode','1');ini_set('session.use_only_cookies','1');ini_set('session.use_trans_sid','0');
+        session_name($csrfName);
+        $save=__DIR__.'/../../storage/sessions/'.$realm;if(!is_dir($save)&&!mkdir($save,0700,true)&&!is_dir($save)){throw new \RuntimeException('Session directory unavailable.');}
+        session_save_path($save);session_set_cookie_params(['lifetime'=>0,'path'=>'/','secure'=>$this->secure(),'httponly'=>true,'samesite'=>'Lax']);
+        if(!session_start()){throw new \RuntimeException('CSRF session unavailable.');}
+        $_SESSION['csrf']??=bin2hex(random_bytes(32));
+        $this->db=new Database($config['database']);$audit=new Audit($this->db);$rate=new RateLimiter($this->db,$config['app_key']);
+        if((int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==6){throw new \RuntimeException('Database migration version mismatch.');}
+        $this->sessions=new Sessions($this->db,$audit);$this->admin=new Administration($this->db,$rate,$audit,$config['setup']??[]);
+        $this->accounts=new Accounts($this->db,$rate,$audit,new TsmsSendOnlyGateway($config['sms']??[],new CurlFormTransport()),$config['app_key']);
+        $this->legal=new Documents($this->db,$audit);$this->external=new ExternalAccounts($this->db,$audit,$rate,new ProviderHttp(),$config);
+        $token=$_COOKIE[$this->cookie]??null;$this->actor=$this->sessions->resolve(is_string($token)?$token:null,$realm);
+        $this->view=new View($config,$realm,$_SESSION['csrf'],$this->actor);
+        $raw=$_GET['r']??parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH);
+        if(!is_string($raw)||strlen($raw)>200||!str_starts_with($raw,'/')||str_contains($raw,'..')){throw new Problem('NOT_FOUND','صفحه پیدا نشد.',404);}
+        $this->path=$raw;$this->api=str_starts_with($raw,'/api/v1/');if($this->api){$this->path=substr($raw,7);}
+        $this->method=$_SERVER['REQUEST_METHOD']??'GET';
+        if($this->method==='POST'){
+            if(str_starts_with(strtolower($_SERVER['CONTENT_TYPE']??''),'application/json')){
+                $body=file_get_contents('php://input',false,null,0,20001);if(strlen($body)>20000){throw new Problem('TOO_LARGE','درخواست بیش از حد بزرگ است.',413);}
+                try{$decoded=json_decode($body,false,16,JSON_THROW_ON_ERROR);}catch(\Throwable $e){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}
+                if(!is_object($decoded)){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}$this->input=(array)$decoded;
+            }else{$this->input=$_POST;}
+            foreach(['phone','display_name','username','user_id','id','purpose','title','body','challenge_id'] as $key){if(is_string($this->input[$key]??null)){$this->view->old[$key]=$this->input[$key];}}
+        }
+    }
+    private function secure():bool{return !empty($_SERVER['HTTPS'])&&strtolower((string)$_SERVER['HTTPS'])!=='off';}
+    private function transport():void
+    {
+        $origin=$this->config['origins'][$this->realm];$parts=parse_url($origin);
+        $expected=strtolower($parts['host'].(isset($parts['port'])?':'.$parts['port']:''));
+        if(strtolower($_SERVER['HTTP_HOST']??'')!==$expected){throw new Problem('INVALID_HOST','دامنه درخواست معتبر نیست.',400);}
+        $dev=($this->config['environment']??'')==='testing'&&($this->config['allow_http_loopback']??false)===true&&in_array($_SERVER['REMOTE_ADDR']??'',['127.0.0.1','::1'],true)&&in_array($parts['host'],['127.0.0.1','localhost','[::1]'],true);
+        if(!$this->secure()&&!$dev){throw new Problem('HTTPS_REQUIRED','برای استفاده از مرشد، HTTPS معتبر دامنه باید فعال باشد.',503);}
+    }
+    private function text(string $key,int $max=60000):string
+    { $v=$this->input[$key]??'';if(!is_string($v)||strlen($v)>$max){throw new Problem('INVALID_INPUT','مقدار ورودی معتبر نیست.');}return $v; }
+    private function queryString(string $key,int $max):string{ $v=$_GET[$key]??'';if(!is_string($v)||strlen($v)>$max){throw new Problem('INVALID_INPUT','پارامتر ورود معتبر نیست.');}return $v;}
+    private function requireActor():array
+    {
+        if(!$this->actor){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect('/login');}throw new Problem('UNAUTHENTICATED','ابتدا وارد حساب شوید.',401);}return $this->actor;
+    }
+    private function csrf():void
+    {
+        $got=$_SERVER['HTTP_X_CSRF_TOKEN']??$this->input['csrf']??'';
+        if(!is_string($got)||!hash_equals($_SESSION['csrf'],$got)){throw new Problem('CSRF_FAILED','اعتبار فرم پایان یافته است؛ داده‌های فرم حفظ شده‌اند. دوباره تلاش کنید.',419);}
+        $origin=$_SERVER['HTTP_ORIGIN']??null;
+        if($origin!==null&&$origin!==$this->config['origins'][$this->realm]){throw new Problem('CSRF_FAILED','مبدأ درخواست معتبر نیست.',419);}
+    }
+    private function redirect(string $route):never{header('Location: '.$this->view->url($route),true,303);exit;}
+    private function json(mixed $data,int $status=200):void{http_response_code($status);header('Content-Type: application/json; charset=utf-8');echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);}
+    private function success(string $route,array $data=['ok'=>true]):void
+    {if($this->api){$this->json($data);}else{$_SESSION['flash']='عملیات با موفقیت انجام شد.';$this->redirect($route);}}
+    private function afterLogin():string{$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
+    private function issue(string $user,string $method,?string $admin=null):void
+    {
+        if($this->actor){$this->sessions->revoke($this->actor['user_id'],$this->realm,$this->actor['session_id']);}
+        $s=$this->sessions->issue($user,$this->realm,$method,$admin,$_SERVER['HTTP_USER_AGENT']??'');
+        setcookie($this->cookie,$s['token'],['expires'=>$s['expires_at'],'path'=>'/','secure'=>$this->secure(),'httponly'=>true,'samesite'=>'Lax']);
+        session_regenerate_id(true);$_SESSION['csrf']=bin2hex(random_bytes(32));
+    }
+    public function run():void
+    {
+        try{
+            $product=new ProductController($this->db,$this->view,$this->actor,$this->realm,$this->api);
+            if($this->method==='POST'){$this->csrf();if(!$product->post($this->path,$this->input)){$this->post();}}
+            elseif($this->method==='GET'){if(!$product->get($this->path)){$this->get();}}
+            else{throw new Problem('METHOD_NOT_ALLOWED','روش درخواست مجاز نیست.',405);}
+        }catch(Problem $e){$this->error($e);}
+    }
+    private function post():void
+    {
+        $ip=$_SERVER['REMOTE_ADDR']??'';
+        if($this->path==='/logout'){
+            $a=$this->requireActor();$this->sessions->revoke($a['user_id'],$this->realm,$a['session_id']);
+            setcookie($this->cookie,'',['expires'=>1,'path'=>'/','secure'=>$this->secure(),'httponly'=>true,'samesite'=>'Lax']);session_regenerate_id(true);$_SESSION['csrf']=bin2hex(random_bytes(32));$this->success('/login');return;
+        }
+        if($this->path==='/auth/password'){
+            if($this->realm==='site'){$user=$this->accounts->passwordLogin($this->text('phone',32),$this->text('password',256),$ip);$this->issue($user,'password');$this->success($this->afterLogin());}
+            else{$a=$this->admin->login($this->text('username',64),$this->text('password',256),$ip);$this->issue($a['user_id'],'admin_password',$a['admin_id']);$this->success('/');}return;
+        }
+        if($this->realm==='admin'){$this->postAdmin($ip);return;}
+        if(in_array($this->path,['/auth/google/start','/auth/eitaa/start'],true)){
+            $provider=$this->path==='/auth/google/start'?'google':'eitaa';$_SESSION['external_browser']??=bin2hex(random_bytes(32));
+            $f=$this->external->begin($provider,$this->text('purpose',12)?:'login',$this->actor,$_SESSION['external_browser'],$ip);
+            if($provider==='google'){if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'");header('Location: '.$f['url'],true,303);}}
+            else{if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; script-src 'self' https://developer.eitaa.com; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");$this->view->page('تأیید حساب ایتا','eitaa',['state'=>$f['state']]);}}return;
+        }
+        if($this->path==='/auth/eitaa/complete'){$r=$this->external->eitaa($this->text('state',64),$this->text('init_data',16384),$_SESSION['external_browser']??'',$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
+        if($this->path==='/auth/otp/request'){
+            $purpose=$this->text('purpose',20);if(!in_array($purpose,['login','reset'],true)){throw new Problem('INVALID_PURPOSE','درخواست معتبر نیست.');}
+            $id=$this->accounts->requestCode($this->text('phone',32),$purpose,$ip);$this->codeForm($id,$purpose);return;
+        }
+        if($this->path==='/auth/otp/verify'){
+            $id=$this->accounts->verifyLogin($this->text('challenge_id',32),$this->text('code',12),$ip);$this->issue($id,'otp');$this->success($this->afterLogin());return;
+        }
+        if($this->path==='/auth/password/reset'){
+            $this->accounts->resetPassword($this->text('challenge_id',32),$this->text('code',12),$this->text('new_password',256),$ip);$this->success('/login');return;
+        }
+        $a=$this->requireActor();
+        switch($this->path){
+            case '/me/identities/unlink':$this->external->unlink($a,$this->text('provider',16));$this->success('/account');return;
+            case '/me/profile':$this->accounts->profile($a['user_id'],$this->text('display_name',500));$this->success('/account');return;
+            case '/me/password':$this->accounts->setPassword($a,$this->text('current_password',256),$this->text('new_password',256));$this->success('/account');return;
+            case '/me/phone/request':$id=$this->accounts->requestCode($this->text('phone',32),'change_phone',$ip,$a,$this->text('current_password',256));$this->codeForm($id,'change_phone');return;
+            case '/me/phone/verify':$this->accounts->changePhone($a,$this->text('challenge_id',32),$this->text('code',12),$ip);$this->issue($a['user_id'],'otp');$this->success('/account');return;
+            case '/me/sessions/revoke':$this->sessions->revoke($a['user_id'],'site',$this->text('id',32));$this->success('/account/sessions');return;
+            case '/me/sessions/revoke-others':$this->sessions->revokeOthers($a['user_id'],'site',$a['session_id']);$this->success('/account/sessions');return;
+            case '/legal/accept':$this->legal->accept($a['user_id'],$this->text('id',32));$this->success('/account');return;
+            case '/notifications/read':$this->db->run('UPDATE m_notifications SET read_at=COALESCE(read_at,?) WHERE id=? AND user_id=?',[time(),$this->text('id',32),$a['user_id']]);$this->success('/notifications');return;
+            default:throw new Problem('FEATURE_UNAVAILABLE','این قابلیت در نسخه فعلی فعال نیست.',503);
+        }
+    }
+    private function postAdmin(string $ip):void
+    {
+        if($this->path==='/setup'){
+            $this->admin->setup($this->text('token',128),$this->text('username',64),$this->text('display_name',500),$this->text('new_password',256),$ip);$this->success('/login');return;
+        }
+        $a=$this->requireActor();
+        switch($this->path){
+            case '/me/password':$this->admin->changePassword($a,$this->text('current_password',256),$this->text('new_password',256));setcookie($this->cookie,'',['expires'=>1,'path'=>'/','secure'=>$this->secure(),'httponly'=>true,'samesite'=>'Lax']);$this->success('/login');return;
+            case '/me/phone/request':$id=$this->accounts->requestCode($this->text('phone',32),'change_phone',$ip,$a,$this->text('current_password',256));$this->codeForm($id,'change_phone');return;
+            case '/me/phone/verify':$this->accounts->changePhone($a,$this->text('challenge_id',32),$this->text('code',12),$ip);$this->success('/security');return;
+            case '/me/sessions/revoke':$this->sessions->revoke($a['user_id'],'admin',$this->text('id',32));$this->success('/security');return;
+            case '/me/sessions/revoke-others':$this->sessions->revokeOthers($a['user_id'],'admin',$a['session_id']);$this->success('/security');return;
+            case '/users/status':$this->admin->userStatus($a,$this->text('current_password',256),$this->text('id',32),$this->text('status',16));$this->success('/users');return;
+            case '/admins/create':$this->admin->addAdmin($a,$this->text('current_password',256),$this->text('user_id',32),$this->text('username',64),$this->text('new_password',256),$this->text('role',24));$this->success('/admins');return;
+            case '/admins/role':$this->admin->role($a,$this->text('current_password',256),$this->text('id',32),$this->text('role',24));$this->success('/admins');return;
+            case '/legal/create':$this->admin->system($a);$this->legal->createBase($a,$this->text('title',700),$this->text('body'));$this->success('/legal');return;
+            case '/legal/publish':$this->admin->system($a);$this->legal->publishBase($a,$this->text('id',32));$this->success('/legal');return;
+            default:throw new Problem('FEATURE_UNAVAILABLE','این قابلیت در نسخه فعلی فعال نیست.',503);
+        }
+    }
+    private function codeForm(string $id,string $purpose,?string $error=null):void
+    {if($this->api){$this->json(['challenge_id'=>$id,'purpose'=>$purpose,'message'=>'اگر کد به شما رسید وارد کنید؛ تحویل پیامک هنوز تأیید نشده است.']);}else{$this->view->page('تأیید شماره','code',['challenge'=>$id,'purpose'=>$purpose],$error);}}
+    private function get(?string $error=null):void
+    {
+        if($this->api&&$this->path==='/csrf'){$this->json(['csrf'=>$_SESSION['csrf']]);return;}
+        if($this->path==='/login'){$this->view->page($this->realm==='admin'?'ورود مدیریت':'ورود به مرشد',$this->realm==='admin'?'admin-login':'login',[],$error);return;}
+        if($this->realm==='admin'){$this->getAdmin($error);return;}
+        if($this->path==='/'){$this->view->page('مرشد؛ گفت‌وگو با صاحب تجربه','home',[],$error);return;}
+        if($this->path==='/auth/google/callback'){$r=$this->external->google($this->queryString('state',64),$this->queryString('code',4096),$_SESSION['external_browser']??'',$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'google');}$this->success($this->afterLogin());return;}
+        if($this->path==='/password/recover'){$this->view->page('بازیابی رمز','recover',[],$error);return;}
+        if($this->path==='/legal'){$this->view->page('قوانین پایه','public-legal',['legal'=>$this->legal->current()],$error);return;}
+        $a=$this->requireActor();
+        switch($this->path){
+            case '/me':$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at FROM m_users WHERE id=?',[$a['user_id']]);$this->json(['user'=>$u,'realm'=>'site']);return;
+            case '/account':case '/account/security':
+                $u=$this->db->one('SELECT display_name,phone,password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$legal=$this->legal->current();
+                $accepted=$legal&&$this->db->one('SELECT user_id FROM m_user_acceptances WHERE user_id=? AND version_id=?',[$a['user_id'],$legal['id']]);
+                $this->view->page('حساب من','account',['user'=>$u,'legal'=>$legal,'accepted'=>(bool)$accepted,'identities'=>$this->external->methods($a['user_id']),'isMentor'=>(bool)$this->db->one('SELECT user_id FROM m_mentors WHERE user_id=?',[$a['user_id']])],$error);return;
+            case '/account/sessions':case '/me/sessions':$rows=$this->sessions->list($a['user_id'],'site');if($this->api){$this->json(['sessions'=>$rows]);}else{$this->view->page('نشست‌های فعال','sessions',['rows'=>$rows],$error);}return;
+            case '/notifications':$rows=$this->db->all('SELECT id,title,body,created_at,read_at,category,destination FROM m_notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50',[$a['user_id']]);if($this->api){$this->json(['notifications'=>$rows]);}else{$this->view->page('اعلان‌ها','notifications',['rows'=>$rows],$error);}return;
+            default:throw new Problem('FEATURE_UNAVAILABLE','این بخش هنوز در دسترس نیست.',503);
+        }
+    }
+    private function getAdmin(?string $error):void
+    {
+        if($this->path==='/setup'){
+            if(($this->config['setup']['enabled']??false)!==true){throw new Problem('NOT_FOUND','راه‌اندازی اولیه بسته است.',404);}
+            $this->view->page('ساخت اولین مدیر','setup',[],$error);return;
+        }
+        $a=$this->requireActor();
+        if($this->path==='/me'){$this->json(['user'=>['id'=>$a['user_id'],'display_name'=>$a['display_name']],'admin_role'=>$a['admin_role'],'realm'=>'admin']);return;}
+        if($this->path==='/security'||$this->path==='/me/sessions'){$rows=$this->sessions->list($a['user_id'],'admin');if($this->api){$this->json(['sessions'=>$rows]);}else{$this->view->page('امنیت حساب مدیریت','admin-security',['rows'=>$rows],$error);}return;}
+        if($this->path==='/'){
+            $stats=[];foreach(['users'=>'m_users','admins'=>'m_admin_accounts','sessions'=>'m_auth_sessions','audit'=>'m_audit_logs'] as $key=>$table){$where=$key==='sessions'?' WHERE revoked_at IS NULL AND expires_at>'.time():'';$stats[$key]=(int)$this->db->run('SELECT COUNT(*) FROM '.$table.$where)->fetchColumn();}
+            $this->view->page('داشبورد مدیریت','admin-dashboard',['stats'=>$stats],$error);return;
+        }
+        $this->admin->system($a);
+        switch($this->path){
+            case '/users':
+                $q=is_string($_GET['q']??null)?trim(substr($_GET['q'],0,160)):'';$page=max(1,min(10000,(int)($_GET['page']??1)));$offset=($page-1)*20;
+                $like='%'.strtr($q,['\\'=>'\\\\','%'=>'\\%','_'=>'\\_']).'%';
+                $rows=$this->db->all('SELECT id,display_name,phone,status,created_at FROM m_users WHERE display_name LIKE ? OR phone LIKE ? OR id=? ORDER BY created_at DESC,id DESC LIMIT 21 OFFSET '.$offset,[$like,$like,$q]);
+                if($this->api){$this->json(['users'=>array_slice($rows,0,20),'has_more'=>count($rows)>20]);}else{$this->view->page('کاربران','admin-users',['rows'=>array_slice($rows,0,20),'more'=>count($rows)>20,'page'=>$page,'query'=>$q],$error);}return;
+            case '/admins':$rows=$this->db->all('SELECT a.id,a.user_id,a.username,a.role,u.display_name,u.status FROM m_admin_accounts a JOIN m_users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 100');$this->view->page('دسترسی مدیران','admin-admins',['rows'=>$rows],$error);return;
+            case '/legal':$rows=$this->db->all('SELECT id,version_no,title,body,content_sha256 FROM m_legal_versions WHERE document_key=\'base\' ORDER BY version_no DESC LIMIT 30');$this->view->page('نسخه‌های قوانین پایه','admin-legal',['rows'=>$rows,'current'=>$this->legal->current()],$error);return;
+            case '/audit':$rows=$this->db->all('SELECT event,actor_user_id,subject_id,realm,created_at FROM m_audit_logs ORDER BY id DESC LIMIT 100');$this->view->page('حسابرسی','admin-audit',['rows'=>$rows],$error);return;
+            case '/settings':$this->view->page('وضعیت اتصال‌ها','admin-settings',[],$error);return;
+            default:throw new Problem('NOT_FOUND','صفحه پیدا نشد.',404);
+        }
+    }
+    private function error(Problem $e):void
+    {
+        http_response_code($e->status);
+        if($this->api){$this->json(['error'=>['code'=>$e->errorCode,'message'=>$e->getMessage()]],$e->status);return;}
+        $path=$this->path;
+        if($this->method==='POST'){
+            if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
+            $this->path=match($path){'/auth/password'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/users/status'=>'/users','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
+        }
+        $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());
+    }
+}

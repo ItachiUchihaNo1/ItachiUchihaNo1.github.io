@@ -1,0 +1,1 @@
+<div class="narrow"><h1>قوانین پایه</h1><?php if($legal): ?><article class="card section"><h2><?= $this->h($legal['title']) ?></h2><p>نسخه <?= $this->h($legal['version_no']) ?></p><div class="bodytext"><?= $this->h($legal['body']) ?></div></article><?php else: ?><p class="notice section">هنوز نسخه‌ای منتشر نشده است.</p><?php endif; ?></div>

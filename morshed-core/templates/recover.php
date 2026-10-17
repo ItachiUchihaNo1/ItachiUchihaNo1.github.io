@@ -1,0 +1,1 @@
+<div class="narrow"><h1>بازیابی رمز</h1><p>کد بازیابی فقط به شماره همراه حساب ارسال می‌شود.</p><section class="card section"><?= $this->start('/auth/otp/request') ?><input type="hidden" name="purpose" value="reset"><?= $this->field('phone','شماره همراه','tel') ?><button class="primary full">درخواست کد بازیابی</button></form></section></div>
