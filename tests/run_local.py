@@ -95,6 +95,22 @@ try:
     for realm,root,p in [('site','morshedapp.ir',webport),('admin','admin.morshedapp.ir',adminport)]:
         start(phpcmd+['-S',f'127.0.0.1:{p}','-t',str(app/root),str(app/root/'index.php')],realm);wait_port(p)
     site=Client(cfg['origins']['site']);adminclient=Client(cfg['origins']['admin']);content=Client(cfg['origins']['admin'])
+    guest=Client(cfg['origins']['site'])
+    status,home,headers=guest.request('/');assert status==200 and 'Location' not in headers and 'صاحب‌تجربه‌های اربعین' in home and 'card-rail' in home
+    assert '<nav class="bottom"' in home and home.count('aria-hidden="true"')>=5
+    assert_status(guest,'/api/v1/me',401);ok('guest opens real public storefront with five navigation icons and no forced authentication')
+    for suffix in ['', '?mode=register', '?method=otp']:
+        html=assert_status(guest,'/login'+suffix,200);assert 'auth-card' in html and 'auth-tabs' in html and 'ورود با ایتا' in html
+    ok('teal login signup and OTP pages render with real server forms')
+    assert_status(guest,'/api/v1/auth/eitaa/context',419,{'init_data':'forged'})
+    status,body,_=guest.post('/auth/eitaa/context',{'init_data':'forged'});assert status==503
+    cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':'test-only-eitaa-token-123456'};config.write_text(json.dumps(cfg),encoding='utf-8')
+    status,home,headers=guest.request('/');assert status==200 and 'developer.eitaa.com' in headers['Content-Security-Policy'] and 'eitaa-context' in home
+    status,body,_=guest.post('/auth/eitaa/context',{'init_data':'hash=forged'});assert status==200
+    assert_status(guest,'/api/v1/me',401)
+    status,body,_=guest.post('/auth/eitaa/start',{'purpose':'login'});assert status==401 and 'INVALID_ASSERTION' in body
+    assert_status(guest,'/api/v1/me',401);ok('Eitaa launch context never authenticates and forged cached data cannot create a session')
+    cfg.pop('eitaa');config.write_text(json.dumps(cfg),encoding='utf-8')
     assert_status(site,'/api/v1/me',401);assert_status(adminclient,'/api/v1/users',401);ok('both realms reject unauthenticated API access')
     assert_status(site,'/api/v1/auth/password',419,{'phone':fixture['phone'],'password':fixture['password']});ok('POST without CSRF is rejected')
     status,body,_=site.request('/api/v1/me/profile',[]);assert status==400 and json.loads(body)['error']['code']=='INVALID_JSON';ok('non-object JSON receives a safe structured validation error')

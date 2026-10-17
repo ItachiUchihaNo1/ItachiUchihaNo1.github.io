@@ -104,6 +104,23 @@ check('organizational scope cannot be bypassed by internal reservation operation
 $o->membership($aa,$org,$mentor['user_id']);$o->membership($aa,$org,$user['user_id']);$orgBid=$b->reserve($aa,$orgRequest,true);check('active shared organization permits eligible reservation',fn()=>eq($b->booking($user,$orgBid)['state'],'pending'));$b->transition($aa,$orgBid,'cancel','پایان آزمون',true);
 $b->settings($mentor,array_replace($baseSettings,['daily_capacity'=>1]));$capacity=$b->reserve($aa,array_replace($request,['starts_at'=>$orgStart,'idempotency_key'=>'daily-capacity-test-key']),true);
 check('daily capacity limits additional nonoverlapping slots',fn()=>eq($b->slots($mentor['user_id'],$date),[]));$b->transition($aa,$capacity,'cancel','پایان آزمون',true);$b->settings($mentor,$baseSettings);
+// Storefront controls exercise publication state and real public visibility.
+$custom=[['type'=>'hero','title'=>'مسئله‌ات را بگو؛ از تجربه‌اش شروع کن.','text'=>'با صاحب تجربه گفت‌وگو کن.','eyebrow'=>'تجربه عملی'],['type'=>'mentors','title'=>'صاحب‌تجربه‌های اربعین','mode'=>'manual','ids'=>[$mentor['user_id']]],['type'=>'experiences','title'=>'تجربه‌های خواندنی','mode'=>'manual','ids'=>[$eid]],['type'=>'topics','title'=>'موضوع دلخواه','mode'=>'manual','ids'=>[$topic]]];
+$before=$c->store();$customId=$c->saveStore($ca,$custom);
+check('editing hero and custom rows stays draft until explicit publication',fn()=>eq($c->store(),$before));
+$c->publishStore($ca,$customId);
+check('published hero is editable without changing taxonomy or other content',fn()=>eq($c->store()[0]['title'],$custom[0]['title']));
+check('custom row title is independent of a fixed category',fn()=>eq($c->store()[1]['title'],'صاحب‌تجربه‌های اربعین'));
+check('manual topic row resolves only chosen active taxonomy',fn()=>eq(array_column($c->store()[3]['items'],'id'),[$topic]));
+$db->run('UPDATE m_terms SET active=0 WHERE id=?',[$topic]);check('inactive taxonomy disappears from published topic row',fn()=>eq($c->store()[3]['items'],[]));$db->run('UPDATE m_terms SET active=1 WHERE id=?',[$topic]);
+$emptyId=$c->saveStore($ca,[['type'=>'experiences','title'=>'حذف تمام کارت‌ها','mode'=>'manual','ids'=>[]]]);$c->publishStore($ca,$emptyId);
+check('removing last manually selected card does not repopulate automatically',fn()=>eq($c->store()[0]['items'],[]));
+$blank=$c->saveStore($ca,[]);$c->publishStore($ca,$blank);check('explicit empty publication is not replaced with default rows',fn()=>eq($c->store(null,true),[]));
+check('a second hero is rejected and cannot alter public version',fn()=>rejects('INVALID_INPUT',fn()=>$c->saveStore($ca,[$custom[0],$custom[0]])));
+check('unknown storefront layout is rejected server side',fn()=>rejects('INVALID_INPUT',fn()=>$c->saveStore($ca,[['type'=>'topics','title'=>'عنوان','layout'=>'unsafe']])));
+check('ordinary site user cannot edit storefront',fn()=>rejects('ACCESS_DENIED',fn()=>$c->saveStore($user,$custom)));
+$c->publishStore($ca,$customId);
+
 // Return to the user-requested policy gate after private fixtures, before HTTP tests.
 $db->run("UPDATE m_legal_publications SET version_id=NULL WHERE document_key='recording'");
 $fixture=json_decode(file_get_contents($cfg['test_fixture_path']),true,512,JSON_THROW_ON_ERROR);

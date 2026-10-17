@@ -67,11 +67,37 @@ final class Content
     public function experience(string $id):array
     {$v=$this->db->one("SELECT e.id,e.mentor_id,v.id AS version_id,v.title,v.body,v.version_no,v.term_id,u.display_name FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id WHERE e.id=? AND m.status='active' AND u.status='active'",[$id]);if(!$v){throw new Problem('NOT_FOUND','تجربه منتشرشده پیدا نشد.',404);}return $v;}
     public function saveStore(array $a,array $blocks):string
-    {return $this->write($a,false,function()use($a,$blocks){if(count($blocks)>20){throw new Problem('INVALID_INPUT','حداکثر بیست بلوک مجاز است.');}$clean=[];foreach($blocks as $b){if(!is_array($b)){throw new Problem('INVALID_INPUT','بلوک معتبر نیست.');}$type=Policy::choice($b['type']??'', ['mentors','experiences','text']);$ids=$b['ids']??[];if(!is_array($ids)||count($ids)>20){throw new Problem('INVALID_INPUT','فهرست بلوک معتبر نیست.');}foreach($ids as $id){if(!is_string($id)||!Security::validId($id)){throw new Problem('INVALID_INPUT','شناسه بلوک معتبر نیست.');}}
-            $start=Policy::integer($b['starts_at']??0,0,4102444800);$end=Policy::integer($b['ends_at']??4102444800,$start+1,4102444800);$clean[]=['type'=>$type,'title'=>Policy::text($b['title']??'',180),'text'=>Policy::text($b['text']??'',4000,0),'ids'=>array_values(array_unique($ids)),'term'=>Policy::text($b['term']??'',32,0),'starts_at'=>$start,'ends_at'=>$end];}
+    {return $this->write($a,false,function()use($a,$blocks){if(count($blocks)>20){throw new Problem('INVALID_INPUT','حداکثر بیست بلوک مجاز است.');}$clean=[];$heroCount=0;foreach($blocks as $b){if(!is_array($b)){throw new Problem('INVALID_INPUT','بلوک معتبر نیست.');}$type=Policy::choice($b['type']??'', ['mentors','experiences','topics','text','hero']);$ids=$b['ids']??[];if(!is_array($ids)||count($ids)>20){throw new Problem('INVALID_INPUT','فهرست بلوک معتبر نیست.');}foreach($ids as $id){if(!is_string($id)||!Security::validId($id)){throw new Problem('INVALID_INPUT','شناسه بلوک معتبر نیست.');}}
+            if($type==='hero'&&++$heroCount>1){throw new Problem('INVALID_INPUT','فقط یک سربرگ اصلی برای ویترین مجاز است.');}
+            $start=Policy::integer($b['starts_at']??0,0,4102444800);$end=Policy::integer($b['ends_at']??4102444800,$start+1,4102444800);$clean[]=['type'=>$type,'title'=>Policy::text($b['title']??'',180),'text'=>Policy::text($b['text']??'',4000,0),'ids'=>array_values(array_unique($ids)),'term'=>Policy::text($b['term']??'',32,0),'starts_at'=>$start,'ends_at'=>$end,'mode'=>Policy::choice($b['mode']??($ids?'manual':'auto'),['manual','auto']),'layout'=>Policy::choice($b['layout']??'rail',['rail','grid']),'eyebrow'=>Policy::text($b['eyebrow']??'',180,0)];}
         $pub=$this->db->one('SELECT id FROM m_store_publication WHERE id=1 FOR UPDATE');$n=(int)$this->db->run('SELECT COALESCE(MAX(version_no),0)+1 FROM m_store_versions')->fetchColumn();$id=Security::id();$this->db->run('INSERT INTO m_store_versions VALUES(?,?,?,?,?)',[$id,$n,json_encode($clean,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE),$a['user_id'],time()]);$this->audit->add($a['user_id'],'admin','store.draft_created',$id);return $id;});}
     public function publishStore(array $a,string $id):void
     {$this->write($a,false,function()use($a,$id){if(!$this->db->one('SELECT id FROM m_store_versions WHERE id=?',[$id])){throw new Problem('NOT_FOUND','نسخه پیدا نشد.',404);}$this->db->run('UPDATE m_store_publication SET version_id=?,published_at=? WHERE id=1',[$id,time()]);$this->audit->add($a['user_id'],'admin','store.published_or_restored',$id);});}
-    public function store(?string $preview=null):array
-    {$v=$preview?$this->db->one('SELECT blocks_json FROM m_store_versions WHERE id=?',[$preview]):$this->db->one('SELECT v.blocks_json FROM m_store_publication p JOIN m_store_versions v ON v.id=p.version_id WHERE p.id=1');$out=[];foreach(json_decode($v['blocks_json']??'[]',true,32,JSON_THROW_ON_ERROR) as $b){if(time()<$b['starts_at']||time()>=$b['ends_at']){continue;}$b['items']=[];if($b['type']!=='text'){if($b['ids']){foreach($b['ids'] as $id){try{$b['items'][]=$b['type']==='mentors'?$this->mentor($id):$this->experience($id);}catch(Problem $e){if($e->status!==404){throw $e;}}}}else{$b['items']=array_slice($b['type']==='mentors'?$this->mentors(['term'=>$b['term']]):$this->experiences(['term'=>$b['term']]),0,6);}}$out[]=$b;}return $out;}
+    public function store(?string $preview=null,bool $homeDefaults=false):array
+    {
+        $v=$preview?$this->db->one('SELECT blocks_json FROM m_store_versions WHERE id=?',[$preview]):$this->db->one('SELECT v.blocks_json FROM m_store_publication p JOIN m_store_versions v ON v.id=p.version_id WHERE p.id=1');
+        $blocks=json_decode($v['blocks_json']??'null',true,32,JSON_THROW_ON_ERROR);
+        // Defaults use only real, published content; an explicitly empty published version stays empty.
+        if($blocks===null){$blocks=$homeDefaults?$this->storeDefaults():[];}
+        $out=[];foreach($blocks as $b){if(time()<$b['starts_at']||time()>=$b['ends_at']){continue;}
+            $b['mode']=$b['mode']??(!empty($b['ids'])?'manual':'auto');$b['layout']=$b['layout']??'rail';$b['items']=[];
+            if(in_array($b['type'],['mentors','experiences','topics'],true)){
+                if($b['mode']==='manual'){foreach($b['ids'] as $id){try{
+                    $item=match($b['type']){'mentors'=>$this->mentor($id),'experiences'=>$this->experience($id),'topics'=>$this->db->one("SELECT id,title,kind FROM m_terms WHERE id=? AND active=1",[$id])};
+                    if($item){$b['items'][]=$item;}
+                }catch(Problem $e){if($e->status!==404){throw $e;}}}}
+                else{$b['items']=array_slice(match($b['type']){'mentors'=>$this->mentors(['term'=>$b['term']]),'experiences'=>$this->experiences(['term'=>$b['term']]),'topics'=>$this->terms()},0,12);}
+            }$out[]=$b;
+        }return $out;
+    }
+    public function storeDefaults():array
+    {
+        $out=[];foreach(['topics'=>'از کجا شروع کنیم؟','mentors'=>'صاحب‌تجربه‌ها','experiences'=>'تجربه‌های خواندنی'] as $type=>$title){$out[]=['type'=>$type,'title'=>$title,'text'=>'','ids'=>[],'term'=>'','mode'=>'auto','layout'=>'rail','starts_at'=>0,'ends_at'=>4102444800];}return $out;
+    }
+    public function storeDraft(?string $id=null):string
+    {
+        $v=$id?$this->db->one('SELECT blocks_json FROM m_store_versions WHERE id=?',[$id]):$this->db->one('SELECT v.blocks_json FROM m_store_publication p JOIN m_store_versions v ON v.id=p.version_id WHERE p.id=1');
+        if($id&&!$v){throw new Problem('NOT_FOUND','پیش‌نویس ویترین پیدا نشد.',404);}
+        return $v['blocks_json']??json_encode($this->storeDefaults(),JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE);
+    }
 }

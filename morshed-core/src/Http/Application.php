@@ -98,11 +98,20 @@ final class Application
             else{$a=$this->admin->login($this->text('username',64),$this->text('password',256),$ip);$this->issue($a['user_id'],'admin_password',$a['admin_id']);$this->success('/');}return;
         }
         if($this->realm==='admin'){$this->postAdmin($ip);return;}
+        if($this->path==='/auth/eitaa/context'){
+            if(!($this->config['eitaa']['enabled']??false)||!($this->config['eitaa']['live_verified']??false)){throw new Problem('PROVIDER_DISABLED','ورود با ایتا هنوز راه‌اندازی نشده است.',503);}
+            $data=$this->text('init_data',16384);if($data===''){throw new Problem('INVALID_INPUT','داده ایتا دریافت نشد.');}
+            $_SESSION['eitaa_context']=['data'=>$data,'expires'=>time()+60];$this->json(['ok'=>true]);return;
+        }
         if(in_array($this->path,['/auth/google/start','/auth/eitaa/start'],true)){
             $provider=$this->path==='/auth/google/start'?'google':'eitaa';$_SESSION['external_browser']??=bin2hex(random_bytes(32));
             $f=$this->external->begin($provider,$this->text('purpose',12)?:'login',$this->actor,$_SESSION['external_browser'],$ip);
             if($provider==='google'){if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'");header('Location: '.$f['url'],true,303);}}
-            else{if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; script-src 'self' https://developer.eitaa.com; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");$this->view->page('تأیید حساب ایتا','eitaa',['state'=>$f['state']]);}}return;
+            else{
+                $data=$this->text('init_data',16384);$cached=$_SESSION['eitaa_context']??null;unset($_SESSION['eitaa_context']);
+                if($data===''&&is_array($cached)&&($cached['expires']??0)>time()){$data=$cached['data'];}
+                if($data!==''){$r=$this->external->eitaa($f['state'],$data,$_SESSION['external_browser'],$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
+                if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; script-src 'self' https://developer.eitaa.com; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");$this->view->page('تأیید حساب ایتا','eitaa',['state'=>$f['state']]);}}return;
         }
         if($this->path==='/auth/eitaa/complete'){$r=$this->external->eitaa($this->text('state',64),$this->text('init_data',16384),$_SESSION['external_browser']??'',$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
         if($this->path==='/auth/otp/request'){
@@ -204,9 +213,10 @@ final class Application
         http_response_code($e->status);
         if($this->api){$this->json(['error'=>['code'=>$e->errorCode,'message'=>$e->getMessage()]],$e->status);return;}
         $path=$this->path;
+        if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/users/status'=>'/users','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/users/status'=>'/users','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());
