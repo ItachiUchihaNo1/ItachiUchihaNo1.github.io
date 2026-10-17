@@ -4,7 +4,7 @@ namespace Morshed\Product;
 use Morshed\Core\{Database,Audit,Problem};
 final class Branding
 {
-    public const DEFAULTS=['support_phone'=>'09120691542','support_email'=>'mozafarijavad287@gmail.com','support_address'=>'','footer_text'=>'مرشد، جایی برای پیدا کردن صاحب تجربه و گفت‌وگوی مستقیم دربارهٔ مسیر پیش روی توست.','footer_logo_link'=>'/','enamad_link'=>''];
+    public const DEFAULTS=['footer_email'=>'mozafarijavad287@gmail.com','support_phone'=>'09120691542','support_email'=>'mozafarijavad287@gmail.com','support_address'=>'','footer_text'=>'مرشد، جایی برای پیدا کردن صاحب تجربه و گفت‌وگوی مستقیم دربارهٔ مسیر پیش روی توست.','footer_logo_link'=>'/','enamad_link'=>''];
     public static function settings(Database $db):array{return array_replace(self::DEFAULTS,array_column($db->all('SELECT setting_key,setting_value FROM m_public_settings'),'setting_value','setting_key'));}
     public static function link(string $value):string
     {
