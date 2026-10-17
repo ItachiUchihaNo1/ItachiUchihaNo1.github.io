@@ -20,11 +20,11 @@ final class View
     {return $this->h(is_string($this->old[$key]??null)?$this->old[$key]:$default);}
     public function start(string $route):string
     {return '<form method="post" action="'.$this->h($this->url($route)).'"><input type="hidden" name="csrf" value="'.$this->h($this->csrf).'">';}
-    public function field(string $key,string $label,string $type='text',string $value='',bool $required=true):string
+    public function field(string $key,string $label,string $type='text',string $value='',bool $required=true,int $maxLength=180):string
     {
         $secret=$type==='password'||in_array($key,['code','token','current_password','new_password'],true);
         $id=$key.'-'.(++$this->fieldSerial);$auto=match($key){'token'=>'off','password','current_password'=>'current-password','new_password'=>'new-password','phone'=>'tel','username','login'=>'username',default=>'on'};
-        return '<label for="'.$this->h($id).'">'.$this->h($label).'</label><input id="'.$this->h($id).'" name="'.$this->h($key).'" type="'.$this->h($type).'" value="'.($secret?'':$this->val($key,$value)).'" '.($required?'required ':'').' maxlength="'.($type==='password'?'128':'180').'" autocomplete="'.$auto.'">';
+        return '<label for="'.$this->h($id).'">'.$this->h($label).'</label><input id="'.$this->h($id).'" name="'.$this->h($key).'" type="'.$this->h($type).'" value="'.($secret?'':$this->val($key,$value)).'" '.($required?'required ':'').' maxlength="'.($type==='password'?'128':(string)max(1,min(2000,$maxLength))).'" autocomplete="'.$auto.'">';
     }
     public function page(string $title,string $template,array $data=[],?string $error=null):void
     {
