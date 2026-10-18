@@ -19,7 +19,7 @@ final class TsmsSendOnlyGateway implements SmsGateway
     public function sendLoginCode(string $phone, string $code): SmsSubmission
     {
         $phone = self::normalizePhone($phone);
-        if (!preg_match('/^[0-9]{6}$/D', $code)) { throw new \InvalidArgumentException('Invalid login code format.'); }
+        if (!preg_match('/^[0-9]{4}$/D', $code)) { throw new \InvalidArgumentException('Invalid login code format.'); }
         // Both explicit opt-ins are private deployment settings, not request parameters.
         if (($this->config['enabled'] ?? false) !== true || ($this->config['https_transport_confirmed'] ?? $this->config['https_post_confirmed'] ?? false) !== true) {
             return new SmsSubmission('disabled');

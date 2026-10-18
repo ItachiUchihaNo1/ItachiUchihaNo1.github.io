@@ -68,7 +68,7 @@ final class Application
     private function redirect(string $route):never{header('Location: '.$this->view->url($route),true,303);exit;}
     private function json(mixed $data,int $status=200):void{http_response_code($status);header('Content-Type: application/json; charset=utf-8');echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);}
     private function success(string $route,array $data=['ok'=>true]):void
-    {if($this->api){$this->json($data);}else{$_SESSION['flash']='عملیات با موفقیت انجام شد.';$this->redirect($route);}}
+    {if($this->api){$this->json($data+['redirect'=>$this->view->url($route)]);}else{$_SESSION['flash']='عملیات با موفقیت انجام شد.';$this->redirect($route);}}
     private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if(!$u['password_hash']||!$this->accounts->username($uid)||!Profile::complete($this->db,$uid)){return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
     private function issue(string $user,string $method,?string $admin=null):void
     {
@@ -123,13 +123,18 @@ final class Application
         if($this->path==='/auth/eitaa/complete'){$r=$this->external->eitaa($this->text('state',64),$this->text('init_data',16384),$_SESSION['external_browser']??'',$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
         if($this->path==='/auth/otp/request'){
             $purpose=$this->text('purpose',20);if(!in_array($purpose,['login','reset'],true)){throw new Problem('INVALID_PURPOSE','درخواست معتبر نیست.');}
-            $id=$this->accounts->requestCode($this->text('phone',32),$purpose,$ip);$this->codeForm($id,$purpose);return;
+            $id=$this->accounts->requestCode($this->text('phone',32),$purpose,$ip);$this->rememberCode($id,$purpose);if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($id,$purpose);return;
+        }
+        if($this->path==='/auth/otp/resend'){
+            $flow=$_SESSION['otp_flow']??[];$id=$this->text('challenge_id',32);
+            if(!isset($flow['id'])||!hash_equals($flow['id'],$id)){throw new Problem('INVALID_CODE','درخواست ارسال متعلق به این مرورگر نیست؛ شماره را دوباره وارد کنید.',403);}
+            $next=$this->accounts->resendCode($id,$flow['purpose'],$ip);$this->rememberCode($next,$flow['purpose']);if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($next,$flow['purpose']);return;
         }
         if($this->path==='/auth/otp/verify'){
-            $id=$this->accounts->verifyLogin($this->text('challenge_id',32),$this->text('code',12),$ip);$this->issue($id,'otp');$this->success($this->afterLogin());return;
+            $id=$this->accounts->verifyLogin($this->text('challenge_id',32),$this->text('code',12),$ip);unset($_SESSION['otp_flow']);$this->issue($id,'otp');$this->success($this->afterLogin());return;
         }
         if($this->path==='/auth/password/reset'){
-            $this->accounts->resetPassword($this->text('challenge_id',32),$this->text('code',12),$this->text('new_password',256),$ip);$this->success('/login');return;
+            $this->accounts->resetPassword($this->text('challenge_id',32),$this->text('code',12),$this->text('new_password',256),$ip);unset($_SESSION['otp_flow']);$this->success('/login');return;
         }
         $a=$this->requireActor();
         switch($this->path){
@@ -170,8 +175,16 @@ final class Application
             default:throw new Problem('FEATURE_UNAVAILABLE','این قابلیت در نسخه فعلی فعال نیست.',503);
         }
     }
+    private function rememberCode(string $id,string $purpose):void
+    {$_SESSION['otp_flow']=['id'=>$id,'purpose'=>$purpose];}
+    private function codeInfo(string $id,string $purpose):array
+    {
+        $flow=$_SESSION['otp_flow']??[];$c=$this->db->one('SELECT phone,created_at,expires_at,purpose FROM m_otp_challenges WHERE id=?',[$id]);
+        $bound=isset($flow['id'])&&hash_equals($flow['id'],$id)&&($flow['purpose']??'')===$purpose;
+        return ['challenge_id'=>$id,'purpose'=>$purpose,'expires_in'=>$c?max(0,(int)$c['expires_at']-time()):0,'resend_in'=>$c?max(0,(int)$c['created_at']+60-time()):60,'masked_phone'=>$bound&&$c?substr($c['phone'],0,4).' ••• '.substr($c['phone'],-2):'','can_resend'=>$bound&&in_array($purpose,['login','reset'],true),'message'=>'کد فقط پس از تأیید سرور پذیرفته می‌شود.'];
+    }
     private function codeForm(string $id,string $purpose,?string $error=null):void
-    {if($this->api){$this->json(['challenge_id'=>$id,'purpose'=>$purpose,'message'=>'اگر کد به شما رسید وارد کنید؛ تحویل پیامک هنوز تأیید نشده است.']);}else{$this->view->page('تأیید شماره','code',['challenge'=>$id,'purpose'=>$purpose],$error);}}
+    {$data=$this->codeInfo($id,$purpose);if($this->api){$this->json($data);}else{$this->view->page('تأیید شماره','code',['challenge'=>$id,'purpose'=>$purpose,'otp'=>$data],$error);}}
     private function get(?string $error=null):void
     {
         if($this->api&&$this->path==='/csrf'){$this->json(['csrf'=>$_SESSION['csrf']]);return;}
@@ -179,6 +192,7 @@ final class Application
         if($this->realm==='admin'){$this->getAdmin($error);return;}
         if($this->path==='/'){$this->view->page('مرشد؛ گفت‌وگو با صاحب تجربه','home',[],$error);return;}
         if($this->path==='/auth/google/callback'){$r=$this->external->google($this->queryString('state',64),$this->queryString('code',4096),$_SESSION['external_browser']??'',$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'google');}$this->success($this->afterLogin());return;}
+        if($this->path==='/auth/otp/code'){$f=$_SESSION['otp_flow']??[];if(!isset($f['id'],$f['purpose'])){throw new Problem('INVALID_CODE','ابتدا درخواست کد کنید.',400);}$this->codeForm($f['id'],$f['purpose'],$error);return;}
         if($this->path==='/password/recover'){$this->view->page('بازیابی رمز','recover',[],$error);return;}
         if($this->path==='/legal'){$this->view->page('قوانین پایه','public-legal',['legal'=>$this->legal->current()],$error);return;}
         $a=$this->requireActor();
@@ -233,7 +247,7 @@ final class Application
         if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/users/status','/users/delete','/users/restore'=>'/users','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/users/status','/users/delete','/users/restore'=>'/users','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());

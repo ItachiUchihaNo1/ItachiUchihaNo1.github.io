@@ -104,6 +104,16 @@ try:
     for suffix in ['', '?mode=register', '?method=otp']:
         html=assert_status(guest,'/login'+suffix,200);assert 'auth-card' in html and 'auth-tabs' in html and 'ورود با ایتا' in html
     ok('teal login signup and OTP pages render with real server forms')
+    otpclient=Client(cfg['origins']['site']);otpclient.request('/api/v1/csrf')
+    sid=next(c.value for c in otpclient.jar if c.name=='morshed_dev_csrf_site')
+    otp=json.loads(subprocess.check_output(phpcmd+[str(app/'tests/otp_fixture.php'),str(configphp),sid],text=True,encoding='utf-8'))
+    html=assert_status(otpclient,'/auth/otp/code',200);assert 'otp-card' in html and 'maxlength="4"' in html and html.count('class="otp-digit"')==4 and '4719' not in html
+    status,body,_=guest.post('/auth/otp/resend',{'challenge_id':otp['challenge_id']});assert status==403 and 'INVALID_CODE' in body
+    status,body,_=otpclient.post('/auth/otp/resend',{'challenge_id':otp['challenge_id']});assert status==429 and 'RESEND_COOLDOWN' in body
+    status,body,_=otpclient.post('/auth/otp/verify',{'challenge_id':otp['challenge_id'],'code':otp['code']});assert status==200 and 'complete' in json.loads(body)['redirect']
+    status,body,_=otpclient.post('/auth/otp/verify',{'challenge_id':otp['challenge_id'],'code':otp['code']});assert status==400
+    ok('four-digit OTP UI authenticates through the real server, prevents replay and binds resend to its browser')
+
     assert_status(guest,'/api/v1/auth/eitaa/context',419,{'init_data':'forged'})
     status,body,_=guest.post('/auth/eitaa/context',{'init_data':'forged'});assert status==503
     cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':'test-only-eitaa-token-123456'};config.write_text(json.dumps(cfg),encoding='utf-8')

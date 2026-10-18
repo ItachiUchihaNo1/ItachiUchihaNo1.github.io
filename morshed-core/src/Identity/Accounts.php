@@ -52,9 +52,9 @@ final class Accounts
             if(!$valid) { throw new Problem('REAUTH_REQUIRED','برای تغییر شماره، رمز فعلی یا احراز هویت تازه لازم است.',403); }
         }
         $this->rate->hit('otp-ip:'.$ip,12,900);$this->rate->hit('otp-phone:'.$phone,3,900);$this->rate->hit('otp-global',100,3600);
-        $id=Security::id();$code=(string)random_int(100000,999999);$now=time();
+        $id=Security::id();$code=(string)random_int(1000,9999);$now=time();
         $target=$this->db->one('SELECT id FROM m_users WHERE phone=?',[$phone]);
-        $this->db->run('INSERT INTO m_otp_challenges(id,phone,purpose,actor_user_id,actor_realm,target_user_id,secret_hmac,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)',[$id,$phone,$purpose,$purpose==='change_phone'?$actor['user_id']:null,$purpose==='change_phone'?($actor['realm']??'site'):null,$target['id']??null,$this->codeHash($id,$code),$now,$now+180]);
+        $this->db->run('INSERT INTO m_otp_challenges(id,phone,purpose,actor_user_id,actor_realm,target_user_id,secret_hmac,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)',[$id,$phone,$purpose,$purpose==='change_phone'?$actor['user_id']:null,$purpose==='change_phone'?($actor['realm']??'site'):null,$target['id']??null,$this->codeHash($id,$code),$now,$now+120]);
         try { $receipt=$this->sms->sendLoginCode($phone,$code);$state=$receipt->status; }
         catch(\Throwable $e) { $state='disabled'; }
         unset($code);
@@ -63,13 +63,23 @@ final class Accounts
         if(in_array($state,['disabled','provider_rejected'],true)) { throw new Problem('SMS_UNAVAILABLE','ارسال کد ورود در حال حاضر فعال یا در دسترس نیست.',503); }
         return $id;
     }
+    /** Called only after the controller proves this challenge belongs to its browser flow. */
+    public function resendCode(string $id,string $purpose,string $ip):string
+    {
+        $c=$this->db->one('SELECT * FROM m_otp_challenges WHERE id=?',[$id]);
+        if(!$c||!in_array($purpose,['login','reset'],true)||$c['purpose']!==$purpose||$c['actor_user_id']!==null||$c['consumed_at']!==null||(int)$c['created_at']<time()-900){throw new Problem('INVALID_CODE','این درخواست پایان یافته است؛ شماره را دوباره وارد کنید.',409);}
+        if((int)$c['created_at']>time()-60){throw new Problem('RESEND_COOLDOWN','برای ارسال دوباره باید یک دقیقه از درخواست قبلی گذشته باشد.',429);}
+        // Retire the previous code once, before a new external send. An uncertain send is never retried automatically.
+        if($this->db->run('UPDATE m_otp_challenges SET consumed_at=? WHERE id=? AND consumed_at IS NULL',[time(),$id])->rowCount()!==1){throw new Problem('INVALID_CODE','درخواست قبلاً مصرف شده است.',409);}
+        return $this->requestCode($c['phone'],$purpose,$ip);
+    }
     private function codeHash(string $id,string $code):string {return hash_hmac('sha256',$id.':'.$code,$this->key);}
     private function consume(string $id,string $code,string $purpose,?string $actor,?string $realm=null):array|Problem
     {
         $code=Security::digits($code);
-        if(!Security::validId($id) || !preg_match('/^[0-9]{6}$/D',$code)) {return new Problem('INVALID_CODE','کد معتبر نیست.',400);}
+        if(!Security::validId($id) || !preg_match('/^[0-9]{4}$/D',$code)) {return new Problem('INVALID_CODE','کد معتبر نیست.',400);}
         $c=$this->db->one('SELECT * FROM m_otp_challenges WHERE id=? FOR UPDATE',[$id]);
-        if(!$c || $c['purpose']!==$purpose || $c['actor_user_id']!==$actor || $c['actor_realm']!==$realm || $c['consumed_at']!==null || (int)$c['expires_at']<=time() || (int)$c['attempts']>=5 || in_array($c['submission_status'],['preparing','disabled','provider_rejected'],true)) {return new Problem('INVALID_CODE','کد نامعتبر، مصرف‌شده یا منقضی است.');}
+        if(!$c || $c['purpose']!==$purpose || $c['actor_user_id']!==$actor || $c['actor_realm']!==$realm || $c['consumed_at']!==null || (int)$c['expires_at']<=time() || (int)$c['attempts']>=3 || in_array($c['submission_status'],['preparing','disabled','provider_rejected'],true)) {return new Problem('INVALID_CODE','کد نامعتبر، مصرف‌شده یا منقضی است.');}
         $this->db->run('UPDATE m_otp_challenges SET attempts=attempts+1 WHERE id=?',[$id]);
         if(!hash_equals($c['secret_hmac'],$this->codeHash($id,$code))) {return new Problem('INVALID_CODE','کد صحیح نیست.');}
         $this->db->run('UPDATE m_otp_challenges SET consumed_at=? WHERE id=?',[time(),$id]);

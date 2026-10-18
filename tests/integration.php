@@ -26,9 +26,10 @@ check('password is securely hashed and authenticates',function()use($db,$uid,$ac
 check('profile fields do not update roles',function()use($accounts,$uid,$db){$accounts->profile($uid,'نام فارسی 🌱');eq($db->run('SELECT display_name FROM m_users WHERE id=?',[$uid])->fetchColumn(),'نام فارسی 🌱');eq($db->one('SELECT id FROM m_admin_accounts WHERE user_id=?',[$uid]),null);});
 check('site actor cannot call core legal publishing',function()use($legal,$user){rejects('ACCESS_DENIED',fn()=>$legal->createBase($user,'عنوان','متن'));});
 
-clearRates();$ch=$accounts->requestCode($phone,'login','test-ip');$right=$sms->codes[$phone];$wrong=$right==='111111'?'222222':'111111';
+clearRates();$ch=$accounts->requestCode($phone,'login','test-ip');$right=$sms->codes[$phone];$wrong=$right==='1111'?'2222':'1111';
+check('new OTP is four digits and expires after 120 seconds',function()use($db,$ch,$right){eq((bool)preg_match('/^[0-9]{4}$/D',$right),true);$v=$db->one('SELECT created_at,expires_at FROM m_otp_challenges WHERE id=?',[$ch]);eq((int)$v['expires_at']-(int)$v['created_at'],120);});
 check('failed OTP attempts are durably committed',function()use($accounts,$db,$ch,$wrong){rejects('INVALID_CODE',fn()=>$accounts->verifyLogin($ch,$wrong,'test-ip'));eq((int)$db->run('SELECT attempts FROM m_otp_challenges WHERE id=?',[$ch])->fetchColumn(),1);});
-check('five wrong codes lock even the correct code',function()use($accounts,$ch,$wrong,$right){for($i=0;$i<4;$i++){rejects('INVALID_CODE',fn()=>$accounts->verifyLogin($ch,$wrong,'test-ip'));}rejects('INVALID_CODE',fn()=>$accounts->verifyLogin($ch,$right,'test-ip'));});
+check('three wrong codes lock even the correct code',function()use($accounts,$ch,$wrong,$right){for($i=0;$i<2;$i++){rejects('INVALID_CODE',fn()=>$accounts->verifyLogin($ch,$wrong,'test-ip'));}rejects('INVALID_CODE',fn()=>$accounts->verifyLogin($ch,$right,'test-ip'));});
 clearRates();$ch=$accounts->requestCode($phone,'login','test-ip');$right=$sms->codes[$phone];$db->run('UPDATE m_otp_challenges SET expires_at=? WHERE id=?',[time()-1,$ch]);
 check('expired OTP is refused',function()use($accounts,$ch,$right){rejects('INVALID_CODE',fn()=>$accounts->verifyLogin($ch,$right,'test-ip'));});
 clearRates();$ch=$accounts->requestCode($phone,'reset','test-ip');$right=$sms->codes[$phone];$secondSite=$sessions->issue($uid,'site','password');
@@ -84,6 +85,11 @@ $accounts->changePhone($actor,$ch,$sms->codes[$adminPhone],'test-ip');$ch=$accou
 check('proved admin phone lets site login reuse the same internal account',function()use($accounts,$ch,$sms,$adminPhone,$actor){eq($accounts->verifyLogin($ch,$sms->codes[$adminPhone],'test-ip'),$actor['user_id']);});
 
 clearRates();$racePhone='09123333333';$raceId=$accounts->requestCode($racePhone,'login','test-ip');
+clearRates();$resendPhone='09129990001';$old=$accounts->requestCode($resendPhone,'login','resend-test');$oldCode=$sms->codes[$resendPhone];
+check('resend cooldown is enforced by the server',fn()=>rejects('RESEND_COOLDOWN',fn()=>$accounts->resendCode($old,'login','resend-test')));
+$db->run('UPDATE m_otp_challenges SET created_at=? WHERE id=?',[time()-61,$old]);$fresh=$accounts->resendCode($old,'login','resend-test');$freshCode=$sms->codes[$resendPhone];
+check('resend creates a fresh proof and consumes the old one',function()use($accounts,$old,$oldCode,$fresh,$freshCode){rejects('INVALID_CODE',fn()=>$accounts->verifyLogin($old,$oldCode,'resend-test'));$accounts->verifyLogin($fresh,$freshCode,'resend-test');});
+clearRates();
 $fixture=['user_id'=>$uid,'phone'=>$phone,'password'=>'New-Test-Password-761!','admin_username'=>'test_admin','admin_password'=>'Correct-Test-Admin-471!',
     'content_username'=>'content_test','content_password'=>'Rotated-Admin-Password-492!',
     'race_job'=>['operation'=>'otp','id'=>$raceId,'code'=>$sms->codes[$racePhone]]];
