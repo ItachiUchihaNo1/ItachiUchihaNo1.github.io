@@ -10,7 +10,8 @@ function check(string $name,callable $fn):void{global $passed,$failed;try{$fn();
 function rejects(string $code,callable $fn):void{try{$fn();}catch(Problem $e){eq($e->errorCode,$code);return;}throw new RuntimeException('Expected '.$code);}
 $aa=$db->one("SELECT id AS admin_id,user_id FROM m_admin_accounts WHERE username='test_admin'")+['realm'=>'admin'];
 $ca=$db->one("SELECT id AS admin_id,user_id FROM m_admin_accounts WHERE username='content_test'")+['realm'=>'admin'];
-$profile=['first_name'=>'آزمایش','last_name'=>'حساب','province'=>'تهران','city'=>'تهران','gender'=>'unspecified'];
+check('profile gender accepts only the two supported values',function(){foreach(['female','male'] as $gender){eq(\Morshed\Identity\Profile::validate(['first_name'=>'کاربر','last_name'=>'آزمون','province'=>'تهران','city'=>'تهران','gender'=>$gender])['gender'],$gender);}rejects('INVALID_PROFILE',fn()=>\Morshed\Identity\Profile::validate(['first_name'=>'کاربر','last_name'=>'آزمون','province'=>'تهران','city'=>'تهران','gender'=>'unspecified']));});
+$profile=['first_name'=>'آزمایش','last_name'=>'حساب','province'=>'تهران','city'=>'تهران','gender'=>'female'];
 check('passwords of 8 characters are accepted and 7 rejected',function(){eq(Security::verifyPassword('Eight123',Security::hashPassword('Eight123')),true);rejects('INVALID_PASSWORD',fn()=>Security::hashPassword('Seven12'));});
 $data=$profile+['username'=>'manual_release03','new_password'=>'Eight123','phone'=>'09129998877'];
 clearRates();check('content admin cannot create site users',fn()=>rejects('ACCESS_DENIED',fn()=>$admin->createUser($ca,'Rotated-Admin-Password-492!',$data)));

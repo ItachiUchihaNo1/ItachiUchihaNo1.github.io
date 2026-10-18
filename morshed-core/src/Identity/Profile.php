@@ -10,7 +10,7 @@ final class Profile
         $v=[];foreach(['first_name'=>'نام','last_name'=>'نام خانوادگی','province'=>'استان','city'=>'شهر','gender'=>'جنسیت'] as $k=>$label){
             $s=$d[$k]??'';if(!is_string($s)||trim($s)===''||preg_match_all('/./us',$s)>($k==='city'?80:60)){throw new Problem('INVALID_PROFILE','فیلد «'.$label.'» را کامل و صحیح وارد کنید.');}$v[$k]=Security::name($s);
         }
-        if(!in_array($v['province'],self::PROVINCES,true)||!in_array($v['gender'],['female','male','unspecified'],true)){throw new Problem('INVALID_PROFILE','استان یا جنسیت انتخاب‌شده معتبر نیست.');}
+        if(!in_array($v['province'],self::PROVINCES,true)||!in_array($v['gender'],['female','male'],true)){throw new Problem('INVALID_PROFILE','استان یا جنسیت انتخاب‌شده معتبر نیست.');}
         return $v;
     }
     public static function get(Database $db,string $uid):array

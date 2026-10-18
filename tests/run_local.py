@@ -136,6 +136,20 @@ try:
     status,body,_=site.post('/account/complete',{'username':'primary_test_user','current_password':fixture['password'],'new_password':fixture['password'],'first_name':'علی','last_name':'آزمون','province':'تهران','city':'تهران','gender':'male'});assert status==200,(status,body)
     ok('incomplete account cannot use protected services before completing local credentials')
 
+    hub=assert_status(site,'/account',200);assert 'account-hub' in hub and 'name="first_name"' not in hub and 'name="current_password"' not in hub
+    for route in ['/account/profile','/account/security','/account/rules','/notifications','/sessions','/support','/account/sessions']:
+        assert urllib.parse.quote(route,safe='') in hub
+    ok('account landing groups real notification settings and request destinations without stacking forms')
+    profilepage=assert_status(site,'/account/profile',200);assert 'value="female"' in profilepage and 'value="male"' in profilepage and 'value="unspecified"' not in profilepage and 'name="current_password"' not in profilepage
+    securitypage=assert_status(site,'/account/security',200);assert 'name="current_password"' in securitypage and 'name="first_name"' not in securitypage
+    rulespage=assert_status(site,'/account/rules',200);assert 'قوانین پایه حساب' in rulespage and 'name="current_password"' not in rulespage
+    ok('profile security and rules are independent authenticated sections with only supported gender options')
+    status,body,_=site.post('/me/profile',{'first_name':'نباید ذخیره شود','last_name':'آزمون','province':'تهران','city':'تهران','gender':'unspecified'});assert status==400 and json.loads(body)['error']['code']=='INVALID_PROFILE'
+    profilepage=assert_status(site,'/account/profile',200);assert 'نباید ذخیره شود' not in profilepage
+    status,body,_=site.request('/api/v1/notifications');unread=sum(row['read_at'] is None for row in json.loads(body)['notifications']);hub=assert_status(site,'/account',200);assert (str(unread)+' اعلان نخوانده' if unread else 'همهٔ اعلان‌ها') in hub
+    ok('unsupported gender fails on the server without changing profile and hub notification count matches only owned records')
+
+
     eitaaclient=Client(cfg['origins']['site']);eitaaclient.request('/api/v1/csrf')
     sid=next(c.value for c in eitaaclient.jar if c.name=='morshed_dev_csrf_site')
     bridge=json.loads(subprocess.check_output(phpcmd+[str(app/'tests/eitaa_phone_fixture.php'),str(configphp),sid],text=True,encoding='utf-8'))
@@ -144,7 +158,8 @@ try:
     status,body,_=guest.post('/auth/otp/verify',{'challenge_id':bridge['challenge_id'],'code':'0000'});assert status==400
     status,body,_=eitaaclient.post('/auth/otp/verify',{'challenge_id':bridge['challenge_id'],'code':bridge['code']});assert status==200 and 'complete' not in json.loads(body)['redirect']
     status,body,_=eitaaclient.request('/api/v1/me');assert status==200 and json.loads(body)['user']['id']==fixture['user_id']
-    html=assert_status(eitaaclient,'/account',200);assert 'primary_test_user' in html and 'تأیید شماره از ایتا' not in html and 'optional-connections' in html
+    html=assert_status(eitaaclient,'/account',200);assert 'primary_test_user' in html and 'تأیید شماره از ایتا' not in html and 'account-hub' in html
+    html=assert_status(eitaaclient,'/account/security',200);assert 'optional-connections' in html
     ok('Eitaa first login identifies the existing SMS account before profile entry and retains the original internal user ID')
 
     redirectclient=Client(cfg['origins']['site']);redirectclient.request('/favicon.ico')
@@ -176,7 +191,7 @@ try:
     status,body,_=content.post('/legal/create',{'title':'forbidden','body':'forbidden'});assert status==403,(status,body);ok('content admin denied system-only API operations')
     evil='<script>alert(1)</script>'
     status,body,_=site.post('/me/profile',{'first_name':evil,'last_name':'آزمون','province':'تهران','city':'تهران','gender':'male','phone':'09120009999','role':'system_admin','user_id':'ffffffffffffffffffffffffffffffff'});assert status==200,(status,body)
-    html=assert_status(site,'/account',200);assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html and evil not in html
+    html=assert_status(site,'/account/profile',200);assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html and evil not in html
     status,body,_=site.request('/api/v1/me');assert json.loads(body)['user']['id']==fixture['user_id'];ok('profile ignores injected ownership/role and escapes stored HTML')
     for path in ['/bookings','/sessions/join','/sessions/archive','/oauth/google','/auth/eitaa']:
         status,body,_=site.post(path,{});assert status==503,(path,status,body)
@@ -217,7 +232,7 @@ try:
     mentorclient=Client(cfg['origins']['site']);ownerclient=Client(cfg['origins']['site'])
     for client,phone,password in [(mentorclient,product['mentor_phone'],product['mentor_password']),(ownerclient,product['owner_phone'],product['owner_password'])]:
         status,body,_=client.post('/auth/password',{'phone':phone,'password':password});assert status==200,(status,body)
-        status,body,_=client.post('/account/complete',{'username':'user_'+phone,'current_password':password,'new_password':password,'first_name':'کاربر','last_name':'آزمون','province':'تهران','city':'تهران','gender':'unspecified'});assert status==200,(status,body)
+        status,body,_=client.post('/account/complete',{'username':'user_'+phone,'current_password':password,'new_password':password,'first_name':'کاربر','last_name':'آزمون','province':'تهران','city':'تهران','gender':'female'});assert status==200,(status,body)
     for path in ['/mentor','/mentor/experiences','/mentor/experience','/mentor/experience?id='+product['experience_id'],'/mentor/calendar','/sessions','/booking?id='+product['booking_id'],'/session?id='+product['booking_id']]:assert_status(mentorclient,path,200)
     ok('mentor account renders only its own real panel calendar experiences and sessions')
     status,body,_=mentorclient.post('/mentor/experience/save',{'title':'<img src=x onerror=alert(1)>','problem':'آزمون متن پایدار','context':'شرایط آزمون','actions':'اقدام آزمون','results':'نتیجه آزمون','lessons':'آموخته آزمون','visibility':'public','owner_approve':'1','term_id':product['topic_id']});assert status==200,(status,body);created=json.loads(body)
