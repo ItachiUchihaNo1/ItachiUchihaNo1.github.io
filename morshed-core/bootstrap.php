@@ -59,7 +59,11 @@ function morshed_run(string $realm):void
         if(!is_array($config)||!preg_match('/^[a-f0-9]{64}$/D',$config['app_key']??'')||!in_array($config['environment']??'',['staging','production','testing'],true)){throw new \RuntimeException('Invalid configuration.');}
         if(!is_array($config['database']??null)||!is_string($config['database']['dsn']??null)||!is_string($config['database']['user']??null)||!is_string($config['database']['password']??null)){throw new \RuntimeException('Database configuration incomplete.');}
         $stage='application';
-        if($realm==='site'&&($config['eitaa']['enabled']??false)&&($config['eitaa']['live_verified']??false)){header("Content-Security-Policy: default-src 'self'; script-src 'self' https://developer.eitaa.com; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");}
+        // Redirects after a form submission are checked against the source page policy.
+        $scripts="'self'";$forms="'self'";
+        if($realm==='site'&&($config['google']['enabled']??false)&&($config['google']['live_verified']??false)){$forms.=' https://accounts.google.com';}
+        if($realm==='site'&&($config['eitaa']['enabled']??false)&&($config['eitaa']['live_verified']??false)){$scripts.=' https://developer.eitaa.com';$forms.=' https://eitaa.com';}
+        header("Content-Security-Policy: default-src 'self'; script-src $scripts; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action $forms");
         (new \Morshed\Http\Application($config,$realm))->run();
     }catch(\Morshed\Core\Problem $e){
         http_response_code($e->status);

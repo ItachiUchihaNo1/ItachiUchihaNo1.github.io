@@ -122,6 +122,10 @@ try:
     assert_status(guest,'/api/v1/me',401)
     status,body,_=guest.post('/auth/eitaa/start',{'purpose':'login','init_data':'hash=forged'});assert status==401 and 'INVALID_ASSERTION' in body
     assert_status(guest,'/api/v1/me',401);ok('Eitaa launch context never authenticates and forged cached data cannot create a session')
+    cfg['google']={'enabled':True,'live_verified':True,'client_id':'123456789-testclient.apps.googleusercontent.com','client_secret':'TEST ONLY','redirect_uri':'https://example.test/callback'};config.write_text(json.dumps(cfg),encoding='utf-8')
+    status,body,headers=guest.request('/login');policy=headers['Content-Security-Policy'];assert "form-action 'self' https://accounts.google.com https://eitaa.com" in policy and 'unsafe-inline' not in policy
+    status,body,headers=adminclient.request('/login');assert "form-action 'self'" in headers['Content-Security-Policy'] and 'accounts.google.com' not in headers['Content-Security-Policy']
+    cfg.pop('google');ok('external form redirects are allowed only to configured official destinations on the main site')
     cfg.pop('eitaa');config.write_text(json.dumps(cfg),encoding='utf-8')
     assert_status(site,'/api/v1/me',401);assert_status(adminclient,'/api/v1/users',401);ok('both realms reject unauthenticated API access')
     assert_status(site,'/api/v1/auth/password',419,{'phone':fixture['phone'],'password':fixture['password']});ok('POST without CSRF is rejected')
