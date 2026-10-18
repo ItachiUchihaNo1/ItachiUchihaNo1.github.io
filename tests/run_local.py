@@ -32,7 +32,7 @@ config=scratch/'private-config.json';config.write_text(json.dumps(cfg),encoding=
 configphp=scratch/'private-config.php';configphp.write_text("<?php return json_decode(file_get_contents(__DIR__.'/private-config.json'),true,512,JSON_THROW_ON_ERROR);",encoding='utf-8')
 local=app/'morshed-core/config/local.php';local.write_text("<?php return json_decode(file_get_contents('"+str(config).replace('\\','/')+"'),true,512,JSON_THROW_ON_ERROR);",encoding='utf-8')
 def wait_port(p):
-    for _ in range(100):
+    for _ in range(300):
         try:
             with socket.create_connection(('127.0.0.1',p),timeout=.15):return
         except OSError:time.sleep(.1)
@@ -131,6 +131,18 @@ try:
     assert_status(site,'/api/v1/sessions',409)
     status,body,_=site.post('/account/complete',{'username':'primary_test_user','current_password':fixture['password'],'new_password':fixture['password'],'first_name':'علی','last_name':'آزمون','province':'تهران','city':'تهران','gender':'male'});assert status==200,(status,body)
     ok('incomplete account cannot use protected services before completing local credentials')
+
+    eitaaclient=Client(cfg['origins']['site']);eitaaclient.request('/api/v1/csrf')
+    sid=next(c.value for c in eitaaclient.jar if c.name=='morshed_dev_csrf_site')
+    bridge=json.loads(subprocess.check_output(phpcmd+[str(app/'tests/eitaa_phone_fixture.php'),str(configphp),sid],text=True,encoding='utf-8'))
+    eitaaclient.jar.set_cookie(http.cookiejar.Cookie(0,'morshed_dev_site',bridge['token'],None,False,'127.0.0.1',False,False,'/',True,False,None,True,None,None,{}))
+    html=assert_status(eitaaclient,'/account',200);assert 'حساب قبلی‌ات را پیدا کنیم' in html and 'first_name' not in html
+    status,body,_=guest.post('/auth/otp/verify',{'challenge_id':bridge['challenge_id'],'code':'0000'});assert status==400
+    status,body,_=eitaaclient.post('/auth/otp/verify',{'challenge_id':bridge['challenge_id'],'code':bridge['code']});assert status==200 and 'complete' not in json.loads(body)['redirect']
+    status,body,_=eitaaclient.request('/api/v1/me');assert status==200 and json.loads(body)['user']['id']==fixture['user_id']
+    html=assert_status(eitaaclient,'/account',200);assert 'primary_test_user' in html and 'تأیید شماره از ایتا' not in html and 'optional-connections' in html
+    ok('Eitaa first login identifies the existing SMS account before profile entry and retains the original internal user ID')
+
     redirectclient=Client(cfg['origins']['site']);redirectclient.request('/favicon.ico')
     status,body,_=redirectclient.request('/api/v1/csrf');redirectcsrf=json.loads(body)['csrf']
     form=urllib.parse.urlencode({'csrf':redirectcsrf,'login':'manual_release03','password':'Eight123'}).encode()
@@ -210,9 +222,10 @@ try:
     status,body,_=content.post('/experience/review',{'id':created['id'],'decision':'approved','note':''});assert status==200,(status,body)
     html=assert_status(site,'/experience?id='+created['experience_id'],200);assert '&lt;img src=x onerror=alert(1)&gt;' in html and '<img src=x' not in html
     ok('HTTP experience draft submission moderation publication and stored-XSS escaping work end to end')
-    for path in ['/auth/google/start','/auth/eitaa/start']:
-        status,body,_=site.post(path,{'purpose':'login'});assert status==503 and 'PROVIDER_DISABLED' in body
-    ok('real external-auth routes stay disabled without verified provider configuration')
+    status,body,_=site.post('/auth/google/start',{'purpose':'login'});assert status==503 and 'PROVIDER_DISABLED' in body
+    status,body,_=guest.post('/auth/eitaa/start',{'purpose':'login'});assert status==200 and json.loads(body)['launch_url']=='https://eitaa.com/morshed_app'
+    assert_status(guest,'/api/v1/me',401)
+    ok('Google stays disabled without private keys and website Eitaa button launches the app without authenticating')
     def control(operation):
         r=subprocess.run(phpcmd+[str(app/'tests/fixture_control.php'),str(configphp),operation],capture_output=True,text=True,encoding='utf-8');assert r.returncode==0,r.stderr
     control('start');control('failure')

@@ -69,7 +69,7 @@ final class Application
     private function json(mixed $data,int $status=200):void{http_response_code($status);header('Content-Type: application/json; charset=utf-8');echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);}
     private function success(string $route,array $data=['ok'=>true]):void
     {if($this->api){$this->json($data+['redirect'=>$this->view->url($route)]);}else{$_SESSION['flash']='عملیات با موفقیت انجام شد.';$this->redirect($route);}}
-    private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if(!$u['password_hash']||!$this->accounts->username($uid)||!Profile::complete($this->db,$uid)){return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
+    private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if(!$u['password_hash']||!$this->accounts->username($uid)||!Profile::complete($this->db,$uid)){if(empty($this->db->one('SELECT phone FROM m_users WHERE id=?',[$uid])['phone'])&&$this->db->one("SELECT id FROM m_auth_identities WHERE user_id=? AND provider='eitaa'",[$uid])){return '/account/identify';}return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
     private function issue(string $user,string $method,?string $admin=null):void
     {
         if($this->actor){$this->sessions->revoke($this->actor['user_id'],$this->realm,$this->actor['session_id']);}
@@ -82,7 +82,7 @@ final class Application
         if($this->realm!=='site'||!$this->actor){return;}
         $protected=in_array($this->path,['/account','/account/security','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
         if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
-        if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect('/account/complete');}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
+        if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect($this->afterLogin());}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
     }
     public function run():void
     {
@@ -111,6 +111,7 @@ final class Application
             if(!isset($_SESSION['eitaa_context'])||($_SESSION['eitaa_context']['expires']??0)<time()||!hash_equals($_SESSION['eitaa_context']['fingerprint']??'',hash('sha256',$data))){$proof=$this->external->captureEitaa($data,$ip);$_SESSION['eitaa_context']=['proof'=>$proof,'fingerprint'=>hash('sha256',$data),'expires'=>time()+900];}$this->json(['ok'=>true]);return;
         }
         if(in_array($this->path,['/auth/google/start','/auth/eitaa/start'],true)){
+            if($this->path==='/auth/eitaa/start'&&$this->text('init_data',16384)===''&&(!isset($_SESSION['eitaa_context']['expires'])||$_SESSION['eitaa_context']['expires']<=time())){if($this->api){$this->json(['launch_url'=>'https://eitaa.com/morshed_app']);}else{header('Location: https://eitaa.com/morshed_app',true,303);}return;}
             $provider=$this->path==='/auth/google/start'?'google':'eitaa';$_SESSION['external_browser']??=bin2hex(random_bytes(32));
             $f=$this->external->begin($provider,$this->text('purpose',12)?:'login',$this->actor,$_SESSION['external_browser'],$ip);
             if($provider==='google'){if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'");header('Location: '.$f['url'],true,303);}}
@@ -118,7 +119,7 @@ final class Application
                 $data=$this->text('init_data',16384);$cached=$_SESSION['eitaa_context']??null;unset($_SESSION['eitaa_context']);
                 if(is_array($cached)&&($cached['expires']??0)>time()&&isset($cached['proof'])&&($data===''||hash_equals($cached['fingerprint'],hash('sha256',$data)))){$r=$this->external->eitaaCaptured($f['state'],$cached['proof'],$_SESSION['external_browser'],$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
                 if($data!==''){$r=$this->external->eitaa($f['state'],$data,$_SESSION['external_browser'],$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
-                if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; script-src 'self' https://developer.eitaa.com; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");$this->view->page('تأیید حساب ایتا','eitaa',['state'=>$f['state']]);}}return;
+                if($this->api){$this->json(['launch_url'=>'https://eitaa.com/morshed_app']);}else{header('Location: https://eitaa.com/morshed_app',true,303);}}return;
         }
         if($this->path==='/auth/eitaa/complete'){$r=$this->external->eitaa($this->text('state',64),$this->text('init_data',16384),$_SESSION['external_browser']??'',$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
         if($this->path==='/auth/otp/request'){
@@ -128,17 +129,18 @@ final class Application
         if($this->path==='/auth/otp/resend'){
             $flow=$_SESSION['otp_flow']??[];$id=$this->text('challenge_id',32);
             if(!isset($flow['id'])||!hash_equals($flow['id'],$id)){throw new Problem('INVALID_CODE','درخواست ارسال متعلق به این مرورگر نیست؛ شماره را دوباره وارد کنید.',403);}
-            $next=$this->accounts->resendCode($id,$flow['purpose'],$ip);$this->rememberCode($next,$flow['purpose']);if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($next,$flow['purpose']);return;
+            $next=$this->accounts->resendCode($id,$flow['purpose'],$ip);$this->rememberCode($next,$flow['purpose']);if(isset($flow['eitaa_source'])){$_SESSION['otp_flow']['eitaa_source']=$flow['eitaa_source'];}if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($next,$flow['purpose']);return;
         }
         if($this->path==='/auth/otp/verify'){
-            $id=$this->accounts->verifyLogin($this->text('challenge_id',32),$this->text('code',12),$ip);unset($_SESSION['otp_flow']);$this->issue($id,'otp');$this->success($this->afterLogin());return;
+            $flow=$_SESSION['otp_flow']??[];if(isset($flow['eitaa_source'])&&(!$this->actor||$flow['eitaa_source']!==$this->actor['user_id']||!hash_equals($flow['id'],$this->text('challenge_id',32)))){throw new Problem('INVALID_STATE','نشست اتصال حساب تغییر کرده است.',401);}$id=$this->accounts->verifyLogin($this->text('challenge_id',32),$this->text('code',12),$ip);if(isset($flow['eitaa_source'])){$this->external->connectVerifiedPhone($this->actor,$id,'verified_sms');}unset($_SESSION['otp_flow']);$this->issue($id,'otp');$this->success($this->afterLogin());return;
         }
         if($this->path==='/auth/password/reset'){
             $this->accounts->resetPassword($this->text('challenge_id',32),$this->text('code',12),$this->text('new_password',256),$ip);unset($_SESSION['otp_flow']);$this->success('/login');return;
         }
         $a=$this->requireActor();
         switch($this->path){
-            case '/me/eitaa/contact':$this->external->contact($a,$this->text('contact_data',16384),$ip);$this->success('/account');return;
+            case '/me/eitaa/contact':$uid=$this->external->contact($a,$this->text('contact_data',16384),$ip);$this->issue($uid,'eitaa');$this->success($this->afterLogin());return;
+            case '/me/eitaa/phone/request':$this->external->requirePhoneLink($a);$id=$this->accounts->requestCode($this->text('phone',32),'login',$ip);$this->rememberCode($id,'login');$_SESSION['otp_flow']['eitaa_source']=$a['user_id'];if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($id,'login');return;
             case '/me/identities/unlink':$this->external->unlink($a,$this->text('provider',16));$this->success('/account');return;
             case '/account/complete':$this->accounts->complete($a,$this->text('username',64),$this->text('new_password',256),$this->text('current_password',256),$this->input);$this->success($this->afterLogin());return;
             case '/me/profile':$this->accounts->profile($a['user_id'],$this->input);$this->success('/account');return;
@@ -193,11 +195,13 @@ final class Application
         if($this->path==='/'){$this->view->page('مرشد؛ گفت‌وگو با صاحب تجربه','home',[],$error);return;}
         if($this->path==='/auth/google/callback'){$r=$this->external->google($this->queryString('state',64),$this->queryString('code',4096),$_SESSION['external_browser']??'',$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'google');}$this->success($this->afterLogin());return;}
         if($this->path==='/auth/otp/code'){$f=$_SESSION['otp_flow']??[];if(!isset($f['id'],$f['purpose'])){throw new Problem('INVALID_CODE','ابتدا درخواست کد کنید.',400);}$this->codeForm($f['id'],$f['purpose'],$error);return;}
+        if($this->path==='/auth/eitaa/start'){header('Location: https://eitaa.com/morshed_app',true,303);return;}
         if($this->path==='/password/recover'){$this->view->page('بازیابی رمز','recover',[],$error);return;}
         if($this->path==='/legal'){$this->view->page('قوانین پایه','public-legal',['legal'=>$this->legal->current()],$error);return;}
         $a=$this->requireActor();
         switch($this->path){
             case '/me':$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at FROM m_users WHERE id=?',[$a['user_id']]);$this->json(['user'=>$u,'realm'=>'site']);return;
+            case '/account/identify':$this->external->requirePhoneLink($a);$this->view->page('پیداکردن حساب قبلی','identify-account',[],$error);return;
             case '/account/complete':$u=$this->db->one('SELECT phone,display_name,password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$this->view->page('تکمیل حساب','complete-account',['user'=>$u,'profile'=>Profile::get($this->db,$a['user_id']),'username'=>$this->accounts->username($a['user_id'])],$error);return;
             case '/account':case '/account/security':
                 $u=$this->db->one('SELECT display_name,phone,password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$legal=$this->legal->current();
@@ -247,7 +251,7 @@ final class Application
         if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/users/status','/users/delete','/users/restore'=>'/users','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/me/eitaa/contact','/me/eitaa/phone/request'=>'/account/identify','/users/status','/users/delete','/users/restore'=>'/users','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());
