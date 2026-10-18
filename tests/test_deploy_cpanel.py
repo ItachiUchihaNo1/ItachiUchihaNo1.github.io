@@ -41,6 +41,8 @@ class DeployTests(unittest.TestCase):
     def test_no_secret_runtime_or_traversal_can_enter_plan(self):
         for name in ['../x.php','/morshedapp.ir/x.php','morshed-core/config/local.php','morshed-core/storage/sessions/a.php','morshed-core/database/migrations/007.sql','morshed-core/.deploy/a.php','morshedapp.ir/.env','morshedapp.ir/../x.php','morshedapp.ir/evil\\x.php']:
             with self.subTest(name=name):self.assertFalse(deploy.allowed(name))
+    def test_only_reviewed_additive_upgrade_script_is_deployable(self):
+        files=deploy.plan();self.assertIn('morshed-core/database/migrations/007_profiles_and_experience_cases.sql',files);self.assertNotIn('morshed-core/database/migrations/001_identity.sql',files)
     def test_real_source_plan_has_assets_and_no_private_config(self):
         files=deploy.plan();self.assertIn('morshedapp.ir/assets/morshed-logo.png',files);self.assertNotIn('morshed-core/config/local.php',files)
     def test_updates_never_replace_domain_php_handler_configuration(self):

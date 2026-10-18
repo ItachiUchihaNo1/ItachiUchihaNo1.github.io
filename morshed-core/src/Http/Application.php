@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace Morshed\Http;
 use Morshed\Core\{Database,RateLimiter,Audit,Problem};
-use Morshed\Identity\{Accounts,Sessions,ExternalAccounts,ProviderHttp};
+use Morshed\Identity\{Accounts,Sessions,ExternalAccounts,ProviderHttp,Profile};
 use Morshed\Access\Administration;
 use Morshed\Legal\Documents;
 use Morshed\Notifications\{TsmsSendOnlyGateway,CurlFormTransport};
@@ -23,12 +23,12 @@ final class Application
         if(!session_start()){throw new \RuntimeException('CSRF session unavailable.');}
         $_SESSION['csrf']??=bin2hex(random_bytes(32));
         $this->db=new Database($config['database']);$audit=new Audit($this->db);$rate=new RateLimiter($this->db,$config['app_key']);
-        if((int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==6){throw new \RuntimeException('Database migration version mismatch.');}
+        if(!in_array((int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn(),[6,7],true)){throw new \RuntimeException('Database migration version mismatch.');}
         $this->sessions=new Sessions($this->db,$audit);$this->admin=new Administration($this->db,$rate,$audit,$config['setup']??[]);
         $this->accounts=new Accounts($this->db,$rate,$audit,new TsmsSendOnlyGateway($config['sms']??[],new CurlFormTransport()),$config['app_key']);
         $this->legal=new Documents($this->db,$audit);$this->external=new ExternalAccounts($this->db,$audit,$rate,new ProviderHttp(),$config);
         $token=$_COOKIE[$this->cookie]??null;$this->actor=$this->sessions->resolve(is_string($token)?$token:null,$realm);
-        $this->view=new View($config,$realm,$_SESSION['csrf'],$this->actor);
+        $config['_schema_version']=(int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn();$this->view=new View($config,$realm,$_SESSION['csrf'],$this->actor);
         $raw=$_GET['r']??parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH);
         if(!is_string($raw)||strlen($raw)>200||!str_starts_with($raw,'/')||str_contains($raw,'..')){throw new Problem('NOT_FOUND','صفحه پیدا نشد.',404);}
         $this->path=$raw;$this->api=str_starts_with($raw,'/api/v1/');if($this->api){$this->path=substr($raw,7);}
@@ -39,7 +39,7 @@ final class Application
                 try{$decoded=json_decode($body,false,16,JSON_THROW_ON_ERROR);}catch(\Throwable $e){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}
                 if(!is_object($decoded)){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}$this->input=(array)$decoded;
             }else{$this->input=$_POST;}
-            foreach(['login','phone','display_name','username','user_id','id','purpose','title','body','challenge_id'] as $key){if(is_string($this->input[$key]??null)){$this->view->old[$key]=$this->input[$key];}}
+            foreach(['login','phone','display_name','username','user_id','id','purpose','title','body','challenge_id','first_name','last_name','province','city','gender'] as $key){if(is_string($this->input[$key]??null)){$this->view->old[$key]=$this->input[$key];}}
         }
     }
     private function secure():bool{return !empty($_SERVER['HTTPS'])&&strtolower((string)$_SERVER['HTTPS'])!=='off';}
@@ -56,7 +56,7 @@ final class Application
     private function queryString(string $key,int $max):string{ $v=$_GET[$key]??'';if(!is_string($v)||strlen($v)>$max){throw new Problem('INVALID_INPUT','پارامتر ورود معتبر نیست.');}return $v;}
     private function requireActor():array
     {
-        if(!$this->actor){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect('/login');}throw new Problem('UNAUTHENTICATED','ابتدا وارد حساب شوید.',401);}return $this->actor;
+        if(!$this->actor){if(!$this->api&&$this->method==='GET'){if(in_array($this->path,['/account','/account/security','/account/complete','/account/sessions','/me/sessions','/notifications','/security'],true)){$_SESSION['return_to']=$this->path;}$this->redirect('/login');}throw new Problem('UNAUTHENTICATED','ابتدا وارد حساب شوید.',401);}return $this->actor;
     }
     private function csrf():void
     {
@@ -69,7 +69,7 @@ final class Application
     private function json(mixed $data,int $status=200):void{http_response_code($status);header('Content-Type: application/json; charset=utf-8');echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);}
     private function success(string $route,array $data=['ok'=>true]):void
     {if($this->api){$this->json($data);}else{$_SESSION['flash']='عملیات با موفقیت انجام شد.';$this->redirect($route);}}
-    private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if(!$u['password_hash']||!$this->accounts->username($uid)){return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
+    private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if(!$u['password_hash']||!$this->accounts->username($uid)||!Profile::complete($this->db,$uid)){return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
     private function issue(string $user,string $method,?string $admin=null):void
     {
         if($this->actor){$this->sessions->revoke($this->actor['user_id'],$this->realm,$this->actor['session_id']);}
@@ -80,9 +80,9 @@ final class Application
     private function completedAccount():void
     {
         if($this->realm!=='site'||!$this->actor){return;}
-        $protected=in_array($this->path,['/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
+        $protected=in_array($this->path,['/account','/account/security','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
         if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
-        if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect('/account/complete');}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا نام کاربری و رمز عبور حساب را تکمیل کنید.',409);}
+        if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect('/account/complete');}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
     }
     public function run():void
     {
@@ -135,11 +135,11 @@ final class Application
         switch($this->path){
             case '/me/eitaa/contact':$this->external->contact($a,$this->text('contact_data',16384),$ip);$this->success('/account');return;
             case '/me/identities/unlink':$this->external->unlink($a,$this->text('provider',16));$this->success('/account');return;
-            case '/account/complete':$this->accounts->complete($a,$this->text('username',64),$this->text('new_password',256),$this->text('current_password',256));$this->success($this->afterLogin());return;
-            case '/me/profile':$this->accounts->profile($a['user_id'],$this->text('display_name',500));$this->success('/account');return;
+            case '/account/complete':$this->accounts->complete($a,$this->text('username',64),$this->text('new_password',256),$this->text('current_password',256),$this->input);$this->success($this->afterLogin());return;
+            case '/me/profile':$this->accounts->profile($a['user_id'],$this->input);$this->success('/account');return;
             case '/me/password':$this->accounts->setPassword($a,$this->text('current_password',256),$this->text('new_password',256));$this->success('/account');return;
-            case '/me/phone/request':$id=$this->accounts->requestCode($this->text('phone',32),'change_phone',$ip,$a,$this->text('current_password',256));$this->codeForm($id,'change_phone');return;
-            case '/me/phone/verify':$this->accounts->changePhone($a,$this->text('challenge_id',32),$this->text('code',12),$ip);$this->issue($a['user_id'],'otp');$this->success('/account');return;
+            case '/me/phone/request':if($this->db->one('SELECT phone FROM m_users WHERE id=?',[$a['user_id']])['phone']){throw new Problem('PHONE_READ_ONLY','شماره تأییدشده قابل ویرایش نیست.',403);}$id=$this->accounts->requestCode($this->text('phone',32),'change_phone',$ip,$a,$this->text('current_password',256));$this->codeForm($id,'change_phone');return;
+            case '/me/phone/verify':if($this->db->one('SELECT phone FROM m_users WHERE id=?',[$a['user_id']])['phone']){throw new Problem('PHONE_READ_ONLY','شماره تأییدشده قابل ویرایش نیست.',403);}$this->accounts->changePhone($a,$this->text('challenge_id',32),$this->text('code',12),$ip);$this->issue($a['user_id'],'otp');$this->success('/account');return;
             case '/me/sessions/revoke':$this->sessions->revoke($a['user_id'],'site',$this->text('id',32));$this->success('/account/sessions');return;
             case '/me/sessions/revoke-others':$this->sessions->revokeOthers($a['user_id'],'site',$a['session_id']);$this->success('/account/sessions');return;
             case '/legal/accept':$this->legal->accept($a['user_id'],$this->text('id',32));$this->success('/account');return;
@@ -159,6 +159,9 @@ final class Application
             case '/me/phone/verify':$this->accounts->changePhone($a,$this->text('challenge_id',32),$this->text('code',12),$ip);$this->success('/security');return;
             case '/me/sessions/revoke':$this->sessions->revoke($a['user_id'],'admin',$this->text('id',32));$this->success('/security');return;
             case '/me/sessions/revoke-others':$this->sessions->revokeOthers($a['user_id'],'admin',$a['session_id']);$this->success('/security');return;
+            case '/users/create':$this->admin->createUser($a,$this->text('current_password',256),$this->input);$this->success('/users');return;
+            case '/users/delete':case '/users/restore':$this->admin->deleteUser($a,$this->text('current_password',256),$this->text('id',32),$this->path==='/users/restore');$this->success('/users');return;
+            case '/upgrade':$this->admin->system($a,$this->text('current_password',256));\Morshed\Core\Upgrade::apply($this->db);(new Audit($this->db))->add($a['user_id'],'admin','installation.schema_upgraded');$this->success('/');return;
             case '/users/status':$this->admin->userStatus($a,$this->text('current_password',256),$this->text('id',32),$this->text('status',16));$this->success('/users');return;
             case '/admins/create':$this->admin->addAdmin($a,$this->text('current_password',256),$this->text('user_id',32),$this->text('username',64),$this->text('new_password',256),$this->text('role',24));$this->success('/admins');return;
             case '/admins/role':$this->admin->role($a,$this->text('current_password',256),$this->text('id',32),$this->text('role',24));$this->success('/admins');return;
@@ -172,7 +175,7 @@ final class Application
     private function get(?string $error=null):void
     {
         if($this->api&&$this->path==='/csrf'){$this->json(['csrf'=>$_SESSION['csrf']]);return;}
-        if($this->path==='/login'){$this->view->page($this->realm==='admin'?'ورود مدیریت':'ورود به مرشد',$this->realm==='admin'?'admin-login':'login',[],$error);return;}
+        if($this->path==='/login'){$this->view->page($this->realm==='admin'?'ورود مدیریت':'ورود به مرشد',$this->realm==='admin'?'admin-login':'login',['setupAvailable'=>$this->realm==='admin'&&($this->config['setup']['enabled']??false)&&!$this->db->one('SELECT bootstrapped_at FROM m_installation WHERE id=1')['bootstrapped_at']],$error);return;}
         if($this->realm==='admin'){$this->getAdmin($error);return;}
         if($this->path==='/'){$this->view->page('مرشد؛ گفت‌وگو با صاحب تجربه','home',[],$error);return;}
         if($this->path==='/auth/google/callback'){$r=$this->external->google($this->queryString('state',64),$this->queryString('code',4096),$_SESSION['external_browser']??'',$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'google');}$this->success($this->afterLogin());return;}
@@ -181,11 +184,11 @@ final class Application
         $a=$this->requireActor();
         switch($this->path){
             case '/me':$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at FROM m_users WHERE id=?',[$a['user_id']]);$this->json(['user'=>$u,'realm'=>'site']);return;
-            case '/account/complete':$u=$this->db->one('SELECT password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$this->view->page('تکمیل حساب','complete-account',['user'=>$u,'username'=>$this->accounts->username($a['user_id'])],$error);return;
+            case '/account/complete':$u=$this->db->one('SELECT phone,display_name,password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$this->view->page('تکمیل حساب','complete-account',['user'=>$u,'profile'=>Profile::get($this->db,$a['user_id']),'username'=>$this->accounts->username($a['user_id'])],$error);return;
             case '/account':case '/account/security':
                 $u=$this->db->one('SELECT display_name,phone,password_hash IS NOT NULL AS has_password FROM m_users WHERE id=?',[$a['user_id']]);$legal=$this->legal->current();
                 $accepted=$legal&&$this->db->one('SELECT user_id FROM m_user_acceptances WHERE user_id=? AND version_id=?',[$a['user_id'],$legal['id']]);
-                $this->view->page('حساب من','account',['username'=>$this->accounts->username($a['user_id']),'user'=>$u,'legal'=>$legal,'accepted'=>(bool)$accepted,'identities'=>$this->external->methods($a['user_id']),'isMentor'=>(bool)$this->db->one('SELECT user_id FROM m_mentors WHERE user_id=?',[$a['user_id']])],$error);return;
+                $this->view->page('حساب من','account',['username'=>$this->accounts->username($a['user_id']),'profile'=>Profile::get($this->db,$a['user_id']),'user'=>$u,'legal'=>$legal,'accepted'=>(bool)$accepted,'identities'=>$this->external->methods($a['user_id']),'isMentor'=>(bool)$this->db->one('SELECT user_id FROM m_mentors WHERE user_id=?',[$a['user_id']])],$error);return;
             case '/account/sessions':case '/me/sessions':$rows=$this->sessions->list($a['user_id'],'site');if($this->api){$this->json(['sessions'=>$rows]);}else{$this->view->page('نشست‌های فعال','sessions',['rows'=>$rows],$error);}return;
             case '/notifications':$rows=$this->db->all('SELECT id,title,body,created_at,read_at,category,destination FROM m_notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50',[$a['user_id']]);if($this->api){$this->json(['notifications'=>$rows]);}else{$this->view->page('اعلان‌ها','notifications',['rows'=>$rows],$error);}return;
             default:throw new Problem('FEATURE_UNAVAILABLE','این بخش هنوز در دسترس نیست.',503);
@@ -194,7 +197,7 @@ final class Application
     private function getAdmin(?string $error):void
     {
         if($this->path==='/setup'){
-            if(($this->config['setup']['enabled']??false)!==true){throw new Problem('NOT_FOUND','راه‌اندازی اولیه بسته است.',404);}
+            if(($this->config['setup']['enabled']??false)!==true||$this->db->one('SELECT bootstrapped_at FROM m_installation WHERE id=1')['bootstrapped_at']){throw new Problem('NOT_FOUND','راه‌اندازی اولیه بسته است.',404);}
             $this->view->page('ساخت اولین مدیر','setup',[],$error);return;
         }
         $a=$this->requireActor();
@@ -209,10 +212,11 @@ final class Application
         }
         $this->admin->system($a);
         switch($this->path){
+            case '/users/new':$this->view->page('افزودن کاربر','admin-user-create',[],$error);return;
             case '/users':
                 $q=is_string($_GET['q']??null)?trim(substr($_GET['q'],0,160)):'';$page=max(1,min(10000,(int)($_GET['page']??1)));$offset=($page-1)*20;
                 $like='%'.strtr($q,['\\'=>'\\\\','%'=>'\\%','_'=>'\\_']).'%';
-                $rows=$this->db->all('SELECT id,display_name,phone,status,created_at FROM m_users WHERE display_name LIKE ? OR phone LIKE ? OR id=? ORDER BY created_at DESC,id DESC LIMIT 21 OFFSET '.$offset,[$like,$like,$q]);
+                $rows=$this->db->all((\Morshed\Core\Upgrade::ready($this->db)?'SELECT u.id,u.display_name,u.phone,u.status,u.created_at,p.deleted_at FROM m_users u LEFT JOIN m_user_profiles p ON p.user_id=u.id WHERE u.display_name LIKE ? OR u.phone LIKE ? OR u.id=? ORDER BY u.created_at DESC,u.id DESC LIMIT 21 OFFSET ':'SELECT id,display_name,phone,status,created_at FROM m_users WHERE display_name LIKE ? OR phone LIKE ? OR id=? ORDER BY created_at DESC,id DESC LIMIT 21 OFFSET ').$offset,[$like,$like,$q]);
                 if($this->api){$this->json(['users'=>array_slice($rows,0,20),'has_more'=>count($rows)>20]);}else{$this->view->page('کاربران','admin-users',['rows'=>array_slice($rows,0,20),'more'=>count($rows)>20,'page'=>$page,'query'=>$q],$error);}return;
             case '/admins':$rows=$this->db->all('SELECT a.id,a.user_id,a.username,a.role,u.display_name,u.status FROM m_admin_accounts a JOIN m_users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 100');$this->view->page('دسترسی مدیران','admin-admins',['rows'=>$rows],$error);return;
             case '/legal':$rows=$this->db->all('SELECT id,version_no,title,body,content_sha256 FROM m_legal_versions WHERE document_key=\'base\' ORDER BY version_no DESC LIMIT 30');$this->view->page('نسخه‌های قوانین پایه','admin-legal',['rows'=>$rows,'current'=>$this->legal->current()],$error);return;
@@ -229,7 +233,7 @@ final class Application
         if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/users/status'=>'/users','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/users/status','/users/delete','/users/restore'=>'/users','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());

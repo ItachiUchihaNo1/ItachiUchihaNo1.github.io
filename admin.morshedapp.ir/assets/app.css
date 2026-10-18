@@ -29,3 +29,10 @@ button:not(.secondary){background:var(--teal);color:white}.prose{white-space:pre
 
 /* Full-width homepage footer; inner columns follow the site content width. */
 .home-shell>.main{padding-bottom:40px;min-height:0}.home-footer-wrap{width:100%;background:#fff;border-top:1px solid var(--line)}.home-footer-wrap>.home-footer{width:100%;max-width:1120px;margin:0 auto;border:0;border-radius:0;background:transparent;padding:36px 24px calc(110px + env(safe-area-inset-bottom))}@media(max-width:480px){.home-shell>.main{padding-bottom:28px}.home-footer-wrap>.home-footer{padding:28px 18px calc(100px + env(safe-area-inset-bottom))}}
+
+/* Account and content editing refinements. */
+.profile-fields{gap:16px}.profile-fields>div{min-width:0}.case-fields{border:1px solid var(--line);border-radius:14px;padding:18px;margin:18px 0}.case-fields>summary{font-weight:700;cursor:pointer;margin-bottom:16px}.case-fields label{margin-top:16px}.store-actions{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:18px}.store-actions>form{margin:0}.store-actions button,.store-actions>a{margin:0}.store-block .row{gap:12px;margin-top:18px}.admin-input input:focus,.admin-input input:focus-visible{outline:none!important;box-shadow:none!important;border:0}.admin-input:focus-within{border-color:#8b9caa;box-shadow:0 0 0 2px #8b9caa18}.case-narrative{margin-top:24px}.case-narrative h2{font-size:20px}.case-overview{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}.case-steps{padding-inline-start:26px}.case-steps>li{padding:8px 4px;line-height:2}.experience-admin-list .card{margin-top:18px}@media(max-width:600px){.profile-fields{grid-template-columns:1fr}.store-actions>*{flex:1;min-width:160px}.case-fields{padding:14px}.case-narrative h2{font-size:18px}}
+
+.card-summary,.experience-card .muted{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}.search-form>.case-fields{grid-column:1/-1}
+
+.profile-fields label{margin-top:0}.profile-fields input,.profile-fields select{margin-bottom:0}

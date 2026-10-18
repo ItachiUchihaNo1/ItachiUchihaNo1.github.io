@@ -29,7 +29,7 @@ for path in sorted(root.rglob('*')):
     files.append(path)
 manifest={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 manifest_path=root/'MANIFEST-SHA256.json'
-manifest_path.write_text(json.dumps({'schema_version':6,'files':manifest},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+manifest_path.write_text(json.dumps({'schema_version':7,'files':manifest},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 files.append(manifest_path)
 def archive(target, selected, prefix):
     target.parent.mkdir(parents=True,exist_ok=True)

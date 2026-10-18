@@ -19,7 +19,7 @@ Morshed incident 123456abcdef reason=DB_ACCESS_DENIED
 | DB_PERMISSION_DENIED / DB_QUERY_PERMISSION_DENIED | کاربر DB به همان دیتابیس وصل و دارای مجوز لازم باشد. |
 | DB_NOT_FOUND / DB_NOT_SELECTED | dbname در DSN نام دقیق دیتابیس انتخاب‌شده در phpMyAdmin، همراه پیشوند حساب باشد. |
 | DB_CONNECTION_FAILED / DB_CONNECTION_LOST | اتصال localhost/socket و سرویس DB یا محدودیت میزبان بررسی شود. |
-| DB_TABLE_MISSING / DB_COLUMN_MISSING / SCHEMA_VERSION_MISMATCH | Import و نسخه schema بررسی شوند؛ سورس حاضر schema 6 می‌خواهد. |
+| DB_TABLE_MISSING / DB_COLUMN_MISSING / SCHEMA_VERSION_MISMATCH | Import و نسخه schema بررسی شوند؛ سورس حاضر نسخه‌های ۶ و ۷ را می‌پذیرد؛ امکانات جدید به ارتقای ۷ طبق UPDATE-03-FA.md نیاز دارند. |
 | PHP_REQUIREMENTS_MISSING | PHP مؤثر دامنه 8.2+ و pdo_mysql باشد؛ PHP phpMyAdmin معیار PHP دامنه نیست. |
 | SESSION_DIRECTORY_UNWRITABLE / SESSION_START_FAILED | قابلیت ساخت/نوشتن پوشه خصوصی storage/sessions برای کاربر PHP بررسی شود؛ 777 راه‌حل پیشنهادی نیست. |
 | APPLICATION_FAILED / DB_QUERY_FAILED | علت هنوز دقیق مشخص نشده؛ کد مجاز و مرحله خطا برای بررسی بعدی ارسال شود. |

@@ -24,7 +24,7 @@ final class View
     {
         $secret=$type==='password'||in_array($key,['code','token','current_password','new_password'],true);
         $id=$key.'-'.(++$this->fieldSerial);$auto=match($key){'token'=>'off','password','current_password'=>'current-password','new_password'=>'new-password','phone'=>'tel','username','login'=>'username',default=>'on'};
-        return '<label for="'.$this->h($id).'">'.$this->h($label).'</label><input id="'.$this->h($id).'" name="'.$this->h($key).'" type="'.$this->h($type).'" value="'.($secret?'':$this->val($key,$value)).'" '.($required?'required ':'').' maxlength="'.($type==='password'?'128':(string)max(1,min(2000,$maxLength))).'" autocomplete="'.$auto.'">';
+        return '<label for="'.$this->h($id).'">'.$this->h($label).'</label><input id="'.$this->h($id).'" name="'.$this->h($key).'" type="'.$this->h($type).'" value="'.($secret?'':$this->val($key,$value)).'" '.($required?'required ':'').' '.($key==='new_password'?'minlength="8" ':'').' maxlength="'.($type==='password'?'128':(string)max(1,min(2000,$maxLength))).'" autocomplete="'.$auto.'">';
     }
     public function page(string $title,string $template,array $data=[],?string $error=null):void
     {

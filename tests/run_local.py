@@ -90,6 +90,7 @@ try:
     php_run('external.php')
     php_run('delivery.php')
     php_run('tsms_gateway.php')
+    php_run('release03.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')
     replies=race(fixture['booking_race']);assert any(x.get('code')=='SLOT_UNAVAILABLE' for x in replies);ok('two concurrent reservation requests cannot consume the same capacity')
@@ -118,8 +119,14 @@ try:
     status,body,_=site.post('/auth/password',{'phone':fixture['phone'],'password':fixture['password']});assert status==200,(status,body)
     status,body,_=site.request('/api/v1/me');assert json.loads(body)['user']['id']==fixture['user_id'];ok('real HTTP password login creates usable site session')
     assert_status(site,'/api/v1/sessions',409)
-    status,body,_=site.post('/account/complete',{'username':'primary_test_user','current_password':fixture['password'],'new_password':fixture['password']});assert status==200,(status,body)
+    status,body,_=site.post('/account/complete',{'username':'primary_test_user','current_password':fixture['password'],'new_password':fixture['password'],'first_name':'علی','last_name':'آزمون','province':'تهران','city':'تهران','gender':'male'});assert status==200,(status,body)
     ok('incomplete account cannot use protected services before completing local credentials')
+    redirectclient=Client(cfg['origins']['site']);redirectclient.request('/favicon.ico')
+    status,body,_=redirectclient.request('/api/v1/csrf');redirectcsrf=json.loads(body)['csrf']
+    form=urllib.parse.urlencode({'csrf':redirectcsrf,'login':'manual_release03','password':'Eight123'}).encode()
+    response=redirectclient.opener.open(urllib.request.Request(redirectclient.base+'/index.php?r=%2Fauth%2Fpassword',data=form,headers={'Content-Type':'application/x-www-form-urlencoded'}))
+    assert '%2Faccount' in response.url and 'حساب من' in response.read().decode('utf-8')
+    ok('browser favicon requests cannot replace the destination after username login')
     sitecookie=next(c.value for c in site.jar if c.name=='morshed_dev_site')
     request=urllib.request.Request(cfg['origins']['admin']+'/index.php?r=%2Fapi%2Fv1%2Fme',headers={'Cookie':'morshed_dev_admin='+sitecookie})
     try:urllib.request.urlopen(request);raise AssertionError('Realm escalation accepted')
@@ -129,14 +136,20 @@ try:
     status,body,_=site.request('/api/v1/csrf');site_csrf=json.loads(body)['csrf']
     status,body,_=adminclient.request('/api/v1/legal/create',{'title':'cross-realm','body':'cross-realm'},site_csrf);assert status==419;ok('site CSRF token is invalid in the admin realm')
     status,body,_=site.request('/api/v1/me/profile',{'display_name':'origin-attack'},site_csrf,{'Origin':'https://invalid.example'});assert status==419;ok('foreign Origin cannot mutate an authenticated profile')
-    for path in ['/','/security','/users','/admins','/legal','/audit','/settings']:
+    for path in ['/','/security','/users','/users/new','/experience/edit','/admins','/legal','/audit','/settings']:
         assert_status(adminclient,path,200)
+    html=assert_status(adminclient,'/login',200);assert 'راه‌اندازی اولین مدیر با کلید نصب' not in html
+    assert_status(adminclient,'/setup',404)
+    status,body,_=site.post('/me/phone/request',{'phone':'09120001111','current_password':fixture['password']});assert status==403 and 'PHONE_READ_ONLY' in body
+    status,body,_=adminclient.post('/upgrade',{'current_password':'invalid'});assert status==403
+    status,body,_=adminclient.post('/upgrade',{'current_password':fixture['admin_password']});assert status==200
+    ok('completed setup is hidden, existing phone is read-only and upgrades require admin proof')
     ok('all implemented admin pages render using live database')
     status,body,_=content.post('/auth/password',{'username':fixture['content_username'],'password':fixture['content_password']});assert status==200,(status,body)
     assert_status(content,'/api/v1/users',403)
     status,body,_=content.post('/legal/create',{'title':'forbidden','body':'forbidden'});assert status==403,(status,body);ok('content admin denied system-only API operations')
     evil='<script>alert(1)</script>'
-    status,body,_=site.post('/me/profile',{'display_name':evil,'role':'system_admin','user_id':'ffffffffffffffffffffffffffffffff'});assert status==200,(status,body)
+    status,body,_=site.post('/me/profile',{'first_name':evil,'last_name':'آزمون','province':'تهران','city':'تهران','gender':'male','phone':'09120009999','role':'system_admin','user_id':'ffffffffffffffffffffffffffffffff'});assert status==200,(status,body)
     html=assert_status(site,'/account',200);assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html and evil not in html
     status,body,_=site.request('/api/v1/me');assert json.loads(body)['user']['id']==fixture['user_id'];ok('profile ignores injected ownership/role and escapes stored HTML')
     for path in ['/bookings','/sessions/join','/sessions/archive','/oauth/google','/auth/eitaa']:
@@ -178,10 +191,10 @@ try:
     mentorclient=Client(cfg['origins']['site']);ownerclient=Client(cfg['origins']['site'])
     for client,phone,password in [(mentorclient,product['mentor_phone'],product['mentor_password']),(ownerclient,product['owner_phone'],product['owner_password'])]:
         status,body,_=client.post('/auth/password',{'phone':phone,'password':password});assert status==200,(status,body)
-        status,body,_=client.post('/account/complete',{'username':'user_'+phone,'current_password':password,'new_password':password});assert status==200,(status,body)
+        status,body,_=client.post('/account/complete',{'username':'user_'+phone,'current_password':password,'new_password':password,'first_name':'کاربر','last_name':'آزمون','province':'تهران','city':'تهران','gender':'unspecified'});assert status==200,(status,body)
     for path in ['/mentor','/mentor/experiences','/mentor/experience','/mentor/experience?id='+product['experience_id'],'/mentor/calendar','/sessions','/booking?id='+product['booking_id'],'/session?id='+product['booking_id']]:assert_status(mentorclient,path,200)
     ok('mentor account renders only its own real panel calendar experiences and sessions')
-    status,body,_=mentorclient.post('/mentor/experience/save',{'title':'<img src=x onerror=alert(1)>','body':'آزمون متن پایدار','term_id':product['topic_id']});assert status==200,(status,body);created=json.loads(body)
+    status,body,_=mentorclient.post('/mentor/experience/save',{'title':'<img src=x onerror=alert(1)>','problem':'آزمون متن پایدار','context':'شرایط آزمون','actions':'اقدام آزمون','results':'نتیجه آزمون','lessons':'آموخته آزمون','visibility':'public','owner_approve':'1','term_id':product['topic_id']});assert status==200,(status,body);created=json.loads(body)
     assert_status(site,'/api/v1/experience?id='+created['experience_id'],404)
     status,body,_=mentorclient.post('/mentor/experience/submit',{'id':created['id']});assert status==200,(status,body)
     status,body,_=content.post('/experience/review',{'id':created['id'],'decision':'approved','note':''});assert status==200,(status,body)
@@ -226,7 +239,7 @@ try:
     except urllib.error.HTTPError as error:r=error
     body=r.read().decode('utf-8');assert r.status==200,(r.status,body);assetid=json.loads(body)['asset_id']
     assert_status(site,'/api/v1/content/asset?id='+assetid,404)
-    status,body,_=mentorclient.post('/mentor/experience/save',{'experience_id':created['experience_id'],'base_version_id':created['id'],'title':'مستند عمومی','body':'متن تجربه با مستند','asset_ids':[assetid]});assert status==200,(status,body);version=json.loads(body)['id']
+    status,body,_=mentorclient.post('/mentor/experience/save',{'experience_id':created['experience_id'],'base_version_id':created['id'],'title':'مستند عمومی','problem':'متن تجربه با مستند','context':'شرایط آزمون','actions':'اقدام آزمون','results':'نتیجه آزمون','lessons':'آموخته آزمون','visibility':'public','owner_approve':'1','asset_ids':[assetid]});assert status==200,(status,body);version=json.loads(body)['id']
     status,body,_=mentorclient.post('/mentor/experience/submit',{'id':version});assert status==200,(status,body)
     status,body,_=content.post('/experience/review',{'id':version,'decision':'approved','note':''});assert status==200,(status,body)
     with site.opener.open(site.base+'/index.php?r=%2Fcontent%2Fasset&id='+assetid) as r:assert r.headers['Content-Type']=='image/png' and r.read()==image_bytes
@@ -267,7 +280,7 @@ if($c['environment']!=='testing'||!preg_match('/dbname=(morshed_test_[a-f0-9]+);
 $original=new Morshed\Core\Database($c['database']);$copyConfig=$c['database'];$clone='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$clone.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($match[1],$clone,$copyConfig['dsn']);$restored=new Morshed\Core\Database($copyConfig);$restored->pdo->exec(file_get_contents($argv[2]));
 foreach($original->all('SHOW TABLES') as $row){$table=array_values($row)[0];if(!preg_match('/^m_[a-z_]+$/D',$table))throw new RuntimeException('Unexpected table');$keys=$original->all('SHOW KEYS FROM `'.$table.'` WHERE Key_name=\'PRIMARY\'');usort($keys,fn($a,$b)=>(int)$a['Seq_in_index']<=>(int)$b['Seq_in_index']);$order=implode(',',array_map(fn($k)=>'`'.$k['Column_name'].'`',$keys));$sql='SELECT * FROM `'.$table.'` ORDER BY '.$order;if($original->all($sql)!==$restored->all($sql))throw new RuntimeException('Restore mismatch '.$table);}
 $restored->run('UPDATE m_auth_sessions SET revoked_at=? WHERE revoked_at IS NULL',[time()]);$restored->run('UPDATE m_otp_challenges SET consumed_at=? WHERE consumed_at IS NULL',[time()]);$restored->run('UPDATE m_external_flows SET consumed_at=? WHERE consumed_at IS NULL',[time()]);if((int)$restored->run('SELECT COUNT(*) FROM m_auth_sessions WHERE revoked_at IS NULL')->fetchColumn()!==0)throw new RuntimeException('Restored sessions not invalidated');
-$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==6||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
+$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==7||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
 echo "PASS all database rows restored and old authentication invalidated\nPASS combined empty-database installer matches numbered migrations\n";
 ''',encoding='utf-8')
         r=subprocess.run(phpcmd+[str(restore),str(configphp),str(dumpfile),str(app)],capture_output=True,text=True,encoding='utf-8');assert r.returncode==0,r.stderr

@@ -9,6 +9,7 @@ ALLOWED_ROOTS={'morshed-core','morshedapp.ir','admin.morshedapp.ir'}
 ALLOWED_EXT={'.php','.css','.js','.png','.woff2','.txt'}
 
 def allowed(name):
+    if name=='morshed-core/database/migrations/007_profiles_and_experience_cases.sql':return True
     p=PurePosixPath(name)
     return (not p.is_absolute() and len(p.parts)>1 and p.parts[0] in ALLOWED_ROOTS
             and all(x not in ('','.','..','storage','config','database','.git') for x in p.parts)
@@ -22,7 +23,7 @@ def host_managed(name):
 
 def plan(root=ROOT):
     migrations=sorted((root/'morshed-core/database/migrations').glob('*.sql'))
-    if not migrations or max(int(p.name.split('_')[0]) for p in migrations)!=6:
+    if not migrations or max(int(p.name.split('_')[0]) for p in migrations)!=7:
         raise ValueError('Database migration review required before automatic deployment')
     files={}
     for top in sorted(ALLOWED_ROOTS):
@@ -174,7 +175,7 @@ def main():
     req=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/ItachiUchihaNo1.github.io/git/ref/heads/main',headers={'Accept':'application/vnd.github+json','User-Agent':'Morshed-deploy'})
     with urllib.request.urlopen(req,timeout=20) as response:head=json.load(response)['object']['sha']
     if head!=commit:print('Skipped: main has a newer commit.');return
-    files['morshedapp.ir/_release.json']=json.dumps({'commit':commit,'schema':6},sort_keys=True).encode()
+    files['morshedapp.ir/_release.json']=json.dumps({'commit':commit,'schema':7},sort_keys=True).encode()
     context=ssl.create_default_context();context.minimum_version=ssl.TLSVersion.TLSv1_2
     ftp=ftplib.FTP_TLS(context=context,timeout=45)
     ftp.connect(os.environ['DEPLOY_FTPS_HOST'],int(os.environ.get('DEPLOY_FTPS_PORT','21')))

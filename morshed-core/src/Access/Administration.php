@@ -33,7 +33,7 @@ final class Administration
     }
     public function system(array $actor,?string $password=null,bool $lock=false):void
     {
-        $a=$this->db->one('SELECT a.role,a.password_hash FROM m_admin_accounts a JOIN m_users u ON u.id=a.user_id WHERE a.id=? AND a.user_id=? AND u.status=\'active\''.($lock?' FOR UPDATE':''),[$actor['admin_id']??'', $actor['user_id']??'']);
+        if(($actor['realm']??'')!=='admin'){throw new Problem('ACCESS_DENIED','نشست مدیریت لازم است.',403);}$a=$this->db->one('SELECT a.role,a.password_hash FROM m_admin_accounts a JOIN m_users u ON u.id=a.user_id WHERE a.id=? AND a.user_id=? AND u.status=\'active\''.($lock?' FOR UPDATE':''),[$actor['admin_id']??'', $actor['user_id']??'']);
         if(!$a || $a['role']!=='system_admin'){throw new Problem('ACCESS_DENIED','مجوز مدیر سامانه لازم است.',403);}
         if($password!==null && !Security::verifyPassword($password,$a['password_hash'])){throw new Problem('REAUTH_REQUIRED','رمز فعلی مدیر صحیح نیست.',403);}
     }
@@ -80,9 +80,42 @@ final class Administration
             $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->system($actor,$current,true);
             if($target===$actor['user_id']){throw new Problem('SELF_CHANGE_DENIED','محدودکردن حساب خودتان مجاز نیست.',403);}
             $u=$this->db->one('SELECT id FROM m_users WHERE id=? FOR UPDATE',[$target]);if(!$u){throw new Problem('NOT_FOUND','حساب پیدا نشد.',404);}
-            $this->db->run('UPDATE m_users SET status=?,updated_at=? WHERE id=?',[$status,time(),$target]);
+            if(\Morshed\Core\Upgrade::ready($this->db)&&!empty(\Morshed\Identity\Profile::get($this->db,$target)['deleted_at'])){throw new Problem('USER_DELETED','ابتدا کاربر حذف‌شده را بازیابی کنید.',409);}$this->db->run('UPDATE m_users SET status=?,updated_at=? WHERE id=?',[$status,time(),$target]);
             if($status==='blocked'){$this->db->run('UPDATE m_auth_sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL',[time(),$target]);}
             $this->audit->add($actor['user_id'],'admin','access.user_'.$status,$target);
+        });
+    }
+    public function createUser(array $actor,string $current,array $d):string
+    {
+        $this->rate->hit('admin-proof:'.$actor['user_id'],10,900);
+        $username=strtolower(trim($d['username']??''));if(!preg_match('/^[a-z][a-z0-9_]{3,31}$/D',$username)){throw new Problem('INVALID_INPUT','نام کاربری ۴ تا ۳۲ حرف انگلیسی، عدد یا زیرخط و با حرف شروع شود.');}
+        $profile=\Morshed\Identity\Profile::validate($d);$hash=Security::hashPassword($d['new_password']??'');
+        return $this->db->tx(function()use($actor,$current,$d,$profile,$username,$hash){
+            $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->system($actor,$current,true);
+            if(!\Morshed\Core\Upgrade::ready($this->db)){throw new Problem('UPGRADE_REQUIRED','ابتدا دیتابیس را به‌روزرسانی کنید.',409);}
+            if($this->db->one("SELECT id FROM m_auth_identities WHERE provider='local_username' AND subject=?",[$username])){throw new Problem('USERNAME_TAKEN','نام کاربری تکراری است.',409);}
+            $uid=Security::id();$this->db->run('INSERT INTO m_users(id,password_hash,created_at,updated_at) VALUES(?,?,?,?)',[$uid,$hash,time(),time()]);
+            \Morshed\Identity\Profile::save($this->db,$uid,$profile);
+            $this->db->run("INSERT INTO m_auth_identities VALUES(?,?,'local_username',?,?)",[Security::id(),$uid,$username,time()]);
+            if(($d['invite_mentor']??'')==='1'){
+                $headline=\Morshed\Product\Policy::text($d['headline']??'',180);$bio=\Morshed\Product\Policy::text($d['bio']??'',20000);
+                $this->db->run('INSERT INTO m_mentors(user_id,headline,bio,invited_at,updated_at) VALUES(?,?,?,?,?)',[$uid,$headline,$bio,time(),time()]);$this->db->run('INSERT INTO m_schedule_settings(mentor_id) VALUES(?)',[$uid]);
+            }
+            $this->audit->add($actor['user_id'],'admin','access.user_created',$uid);return $uid;
+        });
+    }
+    public function deleteUser(array $actor,string $current,string $target,bool $restore=false):void
+    {
+        $this->rate->hit('admin-proof:'.$actor['user_id'],10,900);
+        $this->db->tx(function()use($actor,$current,$target,$restore){
+            $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->system($actor,$current,true);
+            if(!\Morshed\Core\Upgrade::ready($this->db)){throw new Problem('UPGRADE_REQUIRED','ابتدا دیتابیس را به‌روزرسانی کنید.',409);}
+            if($target===$actor['user_id']||$this->db->one('SELECT id FROM m_admin_accounts WHERE user_id=?',[$target])){throw new Problem('ADMIN_PROTECTED','حساب مدیر از این بخش حذف نمی‌شود.',403);}
+            if(!$this->db->one('SELECT id FROM m_users WHERE id=? FOR UPDATE',[$target])){throw new Problem('NOT_FOUND','کاربر پیدا نشد.',404);}
+            $this->db->run('INSERT INTO m_user_profiles(user_id,deleted_at) VALUES(?,?) ON DUPLICATE KEY UPDATE deleted_at=VALUES(deleted_at)',[$target,$restore?null:time()]);
+            $this->db->run('UPDATE m_users SET status=?,updated_at=? WHERE id=?',[$restore?'active':'blocked',time(),$target]);
+            $this->db->run('UPDATE m_auth_sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL',[time(),$target]);
+            $this->audit->add($actor['user_id'],'admin',$restore?'access.user_restored':'access.user_deleted',$target);
         });
     }
 }

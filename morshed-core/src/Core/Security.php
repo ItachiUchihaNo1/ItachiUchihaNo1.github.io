@@ -12,8 +12,8 @@ final class Security
     }
     public static function password(string $value): void
     {
-        if (!preg_match('//u', $value) || preg_match_all('/./us', $value) < 12 || strlen($value) > 72) {
-            throw new Problem('INVALID_PASSWORD','رمز باید حداقل ۱۲ نویسه و حداکثر ۷۲ بایت باشد.');
+        if (!preg_match('//u', $value) || preg_match_all('/./us', $value) < 8 || strlen($value) > 72) {
+            throw new Problem('INVALID_PASSWORD','رمز باید حداقل ۸ نویسه و حداکثر ۷۲ بایت باشد.');
         }
     }
     public static function hashPassword(string $value): string

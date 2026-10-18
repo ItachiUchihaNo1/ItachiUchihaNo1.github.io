@@ -21,17 +21,17 @@ final class Accounts
     }
     public function username(string $uid):?string
     {$r=$this->db->one("SELECT subject FROM m_auth_identities WHERE user_id=? AND provider='local_username'",[$uid]);return $r['subject']??null;}
-    public function complete(array $actor,string $username,string $password,string $current=''):void
+    public function complete(array $actor,string $username,string $password,string $current='',?array $profile=null):void
     {
         $username=strtolower(trim($username));if(!preg_match('/^[a-z][a-z0-9_]{3,31}$/D',$username)){throw new Problem('INVALID_INPUT','نام کاربری باید ۴ تا ۳۲ حرف انگلیسی، عدد یا زیرخط باشد و با حرف شروع شود.');}
         $this->rate->hit('complete-account:'.$actor['user_id'],8,900);$hash=Security::hashPassword($password);
-        $this->db->tx(function()use($actor,$username,$hash,$current){
+        $this->db->tx(function()use($actor,$username,$hash,$current,$profile){
             if(($actor['realm']??'')!=='site'){throw new Problem('ACCESS_DENIED','این عملیات مخصوص حساب سایت است.',403);}
             $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$u=$this->db->one("SELECT password_hash FROM m_users WHERE id=? AND status='active' FOR UPDATE",[$actor['user_id']]);
             $session=$this->db->one("SELECT auth_at FROM m_auth_sessions WHERE id=? AND user_id=? AND realm='site' AND revoked_at IS NULL AND expires_at>?",[$actor['session_id']??'',$actor['user_id'],time()]);
             if(!$u||!$session||($u['password_hash']?!Security::verifyPassword($current,$u['password_hash']):((int)$session['auth_at']<time()-300))){throw new Problem('REAUTH_REQUIRED','رمز فعلی یا ورود تازه برای تکمیل حساب لازم است.',403);}
             $owner=$this->db->one("SELECT user_id FROM m_auth_identities WHERE provider='local_username' AND subject=?",[$username]);if($owner&&$owner['user_id']!==$actor['user_id']){throw new Problem('USERNAME_TAKEN','این نام کاربری قبلاً انتخاب شده است.',409);}
-            $old=$this->username($actor['user_id']);if($old){$this->db->run("UPDATE m_auth_identities SET subject=? WHERE user_id=? AND provider='local_username'",[$username,$actor['user_id']]);}else{$this->db->run("INSERT INTO m_auth_identities(id,user_id,provider,subject,created_at) VALUES(?,?,'local_username',?,?)",[Security::id(),$actor['user_id'],$username,time()]);}
+            if($profile!==null){Profile::save($this->db,$actor['user_id'],$profile);}$old=$this->username($actor['user_id']);if($old){$this->db->run("UPDATE m_auth_identities SET subject=? WHERE user_id=? AND provider='local_username'",[$username,$actor['user_id']]);}else{$this->db->run("INSERT INTO m_auth_identities(id,user_id,provider,subject,created_at) VALUES(?,?,'local_username',?,?)",[Security::id(),$actor['user_id'],$username,time()]);}
             $this->db->run('UPDATE m_users SET password_hash=?,updated_at=? WHERE id=?',[$hash,time(),$actor['user_id']]);$this->db->run("UPDATE m_auth_sessions SET revoked_at=? WHERE user_id=? AND realm='site' AND id<>? AND revoked_at IS NULL",[time(),$actor['user_id'],$actor['session_id']]);$this->audit->add($actor['user_id'],'site','account.credentials_completed');
         });
     }
@@ -129,9 +129,11 @@ final class Accounts
             $this->audit->add($actor['user_id'],$actor['realm']??'site','auth.phone_changed');$this->audit->notify($actor['user_id'],'شماره همراه تغییر کرد','شماره همراه حساب با تأیید مالکیت شماره جدید تغییر کرد.');return null;
         });if($result instanceof Problem){throw $result;}
     }
-    public function profile(string $user,string $name):void
+    public function profile(string $user,string|array $data):void
     {
-        $name=Security::name($name);
-        $this->db->tx(function()use($user,$name){$this->db->run('UPDATE m_users SET display_name=?,updated_at=? WHERE id=?',[$name,time(),$user]);$this->audit->add($user,'site','account.profile_changed');});
+        $this->db->tx(function()use($user,$data){
+            if(is_array($data)){Profile::save($this->db,$user,$data);}else{$this->db->run('UPDATE m_users SET display_name=?,updated_at=? WHERE id=?',[Security::name($data),time(),$user]);}
+            $this->audit->add($user,'site','account.profile_changed');
+        });
     }
 }

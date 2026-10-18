@@ -1,0 +1,5 @@
+<?php $profile=$profile??[]; ?>
+<div class="grid2 profile-fields"><?php foreach(['first_name'=>'نام','last_name'=>'نام خانوادگی'] as $key=>$label): ?><div><?= $this->field($key,$label,'text',$profile[$key]??'',true,$key==='city'?80:60) ?></div><?php endforeach; ?>
+<div><label for="profile-province">استان</label><select id="profile-province" name="province" required><option value="">انتخاب استان</option><?php foreach(\Morshed\Identity\Profile::PROVINCES as $province): ?><option <?= ($this->old['province']??$profile['province']??'')===$province?'selected':'' ?>><?= $this->h($province) ?></option><?php endforeach; ?></select></div>
+<div><?= $this->field('city','شهر','text',$profile['city']??'',true,80) ?></div>
+<div><label for="profile-gender">جنسیت</label><select id="profile-gender" name="gender" required><option value="">انتخاب کنید</option><?php foreach(['female'=>'زن','male'=>'مرد','unspecified'=>'ترجیح می‌دهم نگویم'] as $key=>$label): ?><option value="<?= $key ?>" <?= ($this->old['gender']??$profile['gender']??'')===$key?'selected':'' ?>><?= $label ?></option><?php endforeach; ?></select></div></div>
