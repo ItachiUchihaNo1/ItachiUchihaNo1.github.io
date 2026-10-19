@@ -35,7 +35,7 @@ final class Application
         $this->method=$_SERVER['REQUEST_METHOD']??'GET';
         if($this->method==='POST'){
             if(str_starts_with(strtolower($_SERVER['CONTENT_TYPE']??''),'application/json')){
-                $body=file_get_contents('php://input',false,null,0,20001);if(strlen($body)>20000){throw new Problem('TOO_LARGE','درخواست بیش از حد بزرگ است.',413);}
+                $limit=in_array($this->path,['/experience/save','/mentor/experience/save'],true)?524288:20000;$body=file_get_contents('php://input',false,null,0,$limit+1);if(strlen($body)>$limit){throw new Problem('TOO_LARGE','درخواست بیش از حد بزرگ است.',413);}
                 try{$decoded=json_decode($body,false,16,JSON_THROW_ON_ERROR);}catch(\Throwable $e){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}
                 if(!is_object($decoded)){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}$this->input=(array)$decoded;
             }else{$this->input=$_POST;}
@@ -166,6 +166,7 @@ final class Application
             case '/me/phone/verify':$this->accounts->changePhone($a,$this->text('challenge_id',32),$this->text('code',12),$ip);$this->success('/security');return;
             case '/me/sessions/revoke':$this->sessions->revoke($a['user_id'],'admin',$this->text('id',32));$this->success('/security');return;
             case '/me/sessions/revoke-others':$this->sessions->revokeOthers($a['user_id'],'admin',$a['session_id']);$this->success('/security');return;
+            case '/users/update':$this->admin->editUser($a,$this->text('current_password',256),$this->text('id',32),$this->input);$this->success('/users/edit?id='.rawurlencode($this->text('id',32)));return;
             case '/users/create':$this->admin->createUser($a,$this->text('current_password',256),$this->input);$this->success('/users');return;
             case '/users/delete':case '/users/restore':$this->admin->deleteUser($a,$this->text('current_password',256),$this->text('id',32),$this->path==='/users/restore');$this->success('/users');return;
             case '/upgrade':$this->admin->system($a,$this->text('current_password',256));\Morshed\Core\Upgrade::apply($this->db);(new Audit($this->db))->add($a['user_id'],'admin','installation.schema_upgraded');$this->success('/');return;
@@ -232,6 +233,10 @@ final class Application
         $this->admin->system($a);
         switch($this->path){
             case '/users/new':$this->view->page('افزودن کاربر','admin-user-create',[],$error);return;
+            case '/users/edit':
+                $id=$this->queryString('id',32);$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at,status,created_at FROM m_users WHERE id=?',[$id]);
+                if(!$u){throw new Problem('NOT_FOUND','کاربر پیدا نشد.',404);}
+                $this->view->page('ویرایش اطلاعات کاربر','admin-user-edit',['user'=>$u,'profile'=>Profile::get($this->db,$id),'username'=>$this->accounts->username($id)??'','mentor'=>$this->db->one('SELECT status,accepted_at FROM m_mentors WHERE user_id=?',[$id])],$error);return;
             case '/users':
                 $q=is_string($_GET['q']??null)?trim(substr($_GET['q'],0,160)):'';$page=max(1,min(10000,(int)($_GET['page']??1)));$offset=($page-1)*20;
                 $like='%'.strtr($q,['\\'=>'\\\\','%'=>'\\%','_'=>'\\_']).'%';
@@ -248,11 +253,11 @@ final class Application
     {
         http_response_code($e->status);
         if($this->api){$this->json(['error'=>['code'=>$e->errorCode,'message'=>$e->getMessage()]],$e->status);return;}
-        $path=$this->path;
+        $path=$this->path;if($path==='/users/update'){$_GET['id']=$this->text('id',32);}
         if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/me/profile'=>'/account/profile','/me/password','/me/identities/unlink'=>'/account/security','/legal/accept'=>'/account/rules','/me/eitaa/contact','/me/eitaa/phone/request'=>'/account/identify','/users/status','/users/delete','/users/restore'=>'/users','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/me/profile'=>'/account/profile','/me/password','/me/identities/unlink'=>'/account/security','/legal/accept'=>'/account/rules','/me/eitaa/contact','/me/eitaa/phone/request'=>'/account/identify','/users/status','/users/delete','/users/restore'=>'/users','/users/update'=>'/users/edit','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());

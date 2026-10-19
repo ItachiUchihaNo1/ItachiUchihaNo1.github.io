@@ -91,6 +91,7 @@ try:
     php_run('delivery.php')
     php_run('tsms_gateway.php')
     php_run('release03.php')
+    php_run('admin07.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')
     replies=race(fixture['booking_race']);assert any(x.get('code')=='SLOT_UNAVAILABLE' for x in replies);ok('two concurrent reservation requests cannot consume the same capacity')
@@ -179,6 +180,27 @@ try:
     status,body,_=site.request('/api/v1/me/profile',{'display_name':'origin-attack'},site_csrf,{'Origin':'https://invalid.example'});assert status==419;ok('foreign Origin cannot mutate an authenticated profile')
     for path in ['/','/security','/users','/users/new','/experience/edit','/admins','/legal','/audit','/settings']:
         assert_status(adminclient,path,200)
+    usershtml=assert_status(adminclient,'/users',200);assert 'compact-user-row' in usershtml and 'name="current_password"' not in usershtml
+    useredit=assert_status(adminclient,'/users/edit?id='+fixture['user_id'],200);assert 'name="first_name"' in useredit and fixture['phone'] in useredit and 'name="phone"' not in useredit
+    invitehtml=assert_status(adminclient,'/mentors?candidate_q=notfound',200);assert '<select id="mentor-user"' in invitehtml and 'name="user_id" type="text"' not in invitehtml
+    assert_status(site,'/api/v1/users/edit?id='+fixture['user_id'],503)
+    ok('compact user list and separate admin edit form expose only authorized fields; mentor invitation uses a searchable picker')
+    status,body,_=adminclient.request('/api/v1/mentors?q='+urllib.parse.quote('هنرمند'));assert status==200
+    owner=next(row['user_id'] for row in json.loads(body)['rows'] if row['headline']=='هنرمند رویداد')
+    longcase={'mentor_id':owner,'title':'طراحی و اجرای رویداد هنری سفینةالنجاة با تکیه بر شبکه‌سازی هنرمندان، تولید اثر و تأمین مرحله‌ای منابع','summary':'تجربه هنری مستند '*500,'actions':'اقدام عملی '*500,'problem':'','visibility':'private'}
+    assert len(json.dumps(longcase,ensure_ascii=False).encode())>20000
+    status,body,_=adminclient.post('/experience/save',longcase);assert status==200,(status,body)
+    saved=json.loads(body);status,body,_=adminclient.request('/api/v1/experience/edit?id='+saved['experience_id']);assert status==200
+    assert json.loads(body)['case']['summary']==longcase['summary'].strip()
+    ok('HTTP structured experience accepts a long Persian title and payload above the old API limit without losing the first tab')
+
+    csrf=json.loads(adminclient.request('/api/v1/csrf')[1])['csrf']
+    entered={'csrf':csrf,'id':fixture['user_id'],'current_password':'wrong','first_name':'نام حفظ شده','last_name':'آزمون','city':'تهران','province':'تهران','gender':'male','username':'primary_test_user'}
+    req=urllib.request.Request(adminclient.base+'/index.php?r=%2Fusers%2Fupdate',data=urllib.parse.urlencode(entered).encode(),headers={'Content-Type':'application/x-www-form-urlencoded'})
+    try:response=adminclient.opener.open(req);raise AssertionError('wrong admin proof accepted')
+    except urllib.error.HTTPError as err:
+        html=err.read().decode('utf-8');assert err.code==403 and 'نام حفظ شده' in html and 'admin-user-columns' in html and 'value="wrong"' not in html
+    ok('admin edit validation retains personal form values and never echoes password')
     html=assert_status(adminclient,'/login',200);assert 'راه‌اندازی اولین مدیر با کلید نصب' not in html
     assert_status(adminclient,'/setup',404)
     status,body,_=site.post('/me/phone/request',{'phone':'09120001111','current_password':fixture['password']});assert status==403 and 'PHONE_READ_ONLY' in body

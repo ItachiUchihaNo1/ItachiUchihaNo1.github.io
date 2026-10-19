@@ -18,6 +18,12 @@ final class ExperienceCases
         $out=[];foreach(['problem','context','actions','results','lessons'] as $k){if(trim($d[$k]??'')===''){$out[]=self::NARRATIVE[$k];}}
         if(($d['visibility']??'')!=='public'){$out[]='مجوز نمایش عمومی';}if(empty($d['owner_approved_at'])){$out[]='تأیید همین نسخه توسط صاحب تجربه';}return $out;
     }
+    private static function field(mixed $value,string $label,int $max,int $min=0):string
+    {
+        if(!is_string($value)||!preg_match('//u',$value)){throw new Problem('INVALID_INPUT','فیلد «'.$label.'» باید متن معتبر باشد.');}
+        $value=trim($value);$length=preg_match_all('/./us',$value);
+        if($length<$min||$length>$max||strlen($value)>60000){throw new Problem('INVALID_INPUT','فیلد «'.$label.'» باید '.($min?'بین '.$min.' و ':'حداکثر ').$max.' نویسه و حداکثر ۶۰ کیلوبایت باشد.');}return $value;
+    }
     public function save(array $a,array $input):array
     {
         if(!Upgrade::ready($this->db)){throw new Problem('UPGRADE_REQUIRED','ابتدا به‌روزرسانی دیتابیس لازم است.',503);}
@@ -30,13 +36,13 @@ final class ExperienceCases
             if(!$this->db->one("SELECT m.user_id FROM m_mentors m JOIN m_users u ON u.id=m.user_id WHERE m.user_id=? AND u.status='active'",[$mentor])){throw new Problem('INVALID_MENTOR','صاحب تجربه را از پرونده‌های مرشد انتخاب کنید.');}
             $latest=$this->db->one('SELECT * FROM m_experience_versions WHERE experience_id=? ORDER BY version_no DESC LIMIT 1 FOR UPDATE',[$eid]);
             if(($input['base_version_id']??'')!==($latest['id']??'')){throw new Problem('STALE_VERSION','نسخه تغییر کرده است؛ صفحه را دوباره باز کنید.',409);}
-            $title=Policy::text($input['title']??'',180);$term=($input['term_id']??'')?:null;if($term&&!$this->db->one('SELECT id FROM m_terms WHERE id=? AND active=1',[$term])){throw new Problem('INVALID_TOPIC','موضوع معتبر نیست.');}
-            $d=[];foreach([...self::PUBLIC_FIELDS,...self::PRIVATE_FIELDS] as $k){$d[$k]=Policy::text($input[$k]??'', $k==='source_text'?60000:($k==='summary'?1800:10000),0);}
+            $title=self::field($input['title']??'','عنوان تجربه',180,1);$term=($input['term_id']??'')?:null;if($term&&!$this->db->one('SELECT id FROM m_terms WHERE id=? AND active=1',[$term])){throw new Problem('INVALID_TOPIC','موضوع معتبر نیست.');}
+            $d=[];foreach([...self::PUBLIC_FIELDS,...self::PRIVATE_FIELDS] as $k){$labels=['summary'=>'خلاصه و شناسنامه','role'=>'نقش صاحب تجربه','activity_area'=>'حوزه فعالیت','period'=>'زمان اجرا','setting'=>'بستر اجرا','source_text'=>'متن خام مصاحبه'];$d[$k]=self::field($input[$k]??'',$labels[$k]??(self::NARRATIVE[$k]??$k),$k==='source_text'?30000:10000);}
             $d['outcome']=Policy::choice($input['outcome']??'unknown',['success','failure','mixed','unknown']);$d['visibility']=Policy::choice($input['visibility']??'private',['private','public']);$d['method']='manual';
             $required=array_filter(['problem','context','actions','results','lessons'],fn($k)=>$d[$k]==='');$d['quality_level']=$required?'incomplete':(($d['claim_sources']!==''&&$d['challenges']!==''&&$d['decisions']!=='')?'rich':'ready');
             $d['owner_approved_at']=(!$admin&&($input['owner_approve']??'')==='1')?time():null;$d['updated_by']=$a['user_id'];$d['updated_at']=time();
             $body=$d['summary']."\n".$d['problem_statement']."\n".$d['synonyms']."\n".$d['target_audience']."\n".$d['applicability']."\n".implode("\n\n",array_map(fn($k)=>self::NARRATIVE[$k]."\n".$d[$k],array_keys(self::NARRATIVE)));
-            if(strlen($body)>60000){throw new Problem('TOO_LARGE','متن تجربه بیش از حد طولانی است.');}
+            if(strlen($body)>480000){throw new Problem('TOO_LARGE','مجموع متن قابل جست‌وجوی تجربه از ظرفیت ۴۸۰ کیلوبایت بیشتر است؛ متن خام طولانی را در بخش منابع خصوصی قرار دهید. هیچ تغییری ذخیره نشد.');}
             if(!$e){$this->db->run('INSERT INTO m_experiences(id,mentor_id,created_at) VALUES(?,?,?)',[$eid,$mentor,time()]);}
             // Reviewed, submitted and public versions are immutable; edits start a new revision.
             $id=Security::id();

@@ -99,9 +99,27 @@ final class Administration
             $this->db->run("INSERT INTO m_auth_identities VALUES(?,?,'local_username',?,?)",[Security::id(),$uid,$username,time()]);
             if(($d['invite_mentor']??'')==='1'){
                 $headline=\Morshed\Product\Policy::text($d['headline']??'',180);$bio=\Morshed\Product\Policy::text($d['bio']??'',20000);
-                $this->db->run('INSERT INTO m_mentors(user_id,headline,bio,invited_at,updated_at) VALUES(?,?,?,?,?)',[$uid,$headline,$bio,time(),time()]);$this->db->run('INSERT INTO m_schedule_settings(mentor_id) VALUES(?)',[$uid]);
+                $this->db->run('INSERT INTO m_mentors(user_id,headline,bio,invited_at,updated_at) VALUES(?,?,?,?,?)',[$uid,$headline,$bio,time(),time()]);$this->db->run('INSERT INTO m_schedule_settings(mentor_id) VALUES(?)',[$uid]);$this->audit->notify($uid,'دعوت به مرشد','مدیریت شما را به مرشدشدن دعوت کرده است؛ دعوت را از پنل مرشد بررسی کنید.','/mentor');
             }
             $this->audit->add($actor['user_id'],'admin','access.user_created',$uid);return $uid;
+        });
+    }
+    public function editUser(array $actor,string $current,string $target,array $d):void
+    {
+        $this->rate->hit('admin-proof:'.$actor['user_id'],10,900);
+        $this->db->tx(function()use($actor,$current,$target,$d){
+            $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->system($actor,$current,true);
+            if(!Security::validId($target)||!$this->db->one('SELECT id FROM m_users WHERE id=? FOR UPDATE',[$target])){throw new Problem('NOT_FOUND','کاربر پیدا نشد.',404);}
+            if(!empty(\Morshed\Identity\Profile::get($this->db,$target)['deleted_at'])){throw new Problem('USER_DELETED','ابتدا کاربر حذف‌شده را بازیابی کنید.',409);}
+            $profile=\Morshed\Identity\Profile::validate($d);$username=$d['username']??'';
+            if(!is_string($username)||!preg_match('/^[a-z][a-z0-9_]{3,31}$/D',$username)){throw new Problem('INVALID_USERNAME','نام کاربری باید ۴ تا ۳۲ نویسه انگلیسی باشد و با حرف شروع شود.');}
+            $existing=$this->db->one("SELECT user_id FROM m_auth_identities WHERE provider='local_username' AND subject=?",[$username]);
+            if($existing&&$existing['user_id']!==$target){throw new Problem('USERNAME_TAKEN','نام کاربری قبلاً استفاده شده است.',409);}
+            $identity=$this->db->one("SELECT id FROM m_auth_identities WHERE provider='local_username' AND user_id=?",[$target]);
+            if($identity){$this->db->run('UPDATE m_auth_identities SET subject=? WHERE id=?',[$username,$identity['id']]);}
+            else{$this->db->run("INSERT INTO m_auth_identities VALUES(?,?,'local_username',?,?)",[Security::id(),$target,$username,time()]);}
+            \Morshed\Identity\Profile::save($this->db,$target,$profile);
+            $this->audit->add($actor['user_id'],'admin','access.user_profile_edited',$target);
         });
     }
     public function deleteUser(array $actor,string $current,string $target,bool $restore=false):void
