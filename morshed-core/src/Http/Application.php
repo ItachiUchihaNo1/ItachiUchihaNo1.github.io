@@ -69,10 +69,18 @@ final class Application
     private function json(mixed $data,int $status=200):void{http_response_code($status);header('Content-Type: application/json; charset=utf-8');echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);}
     private function success(string $route,array $data=['ok'=>true]):void
     {if($this->api){$this->json($data+['redirect'=>$this->view->url($route)]);}else{$_SESSION['flash']='عملیات با موفقیت انجام شد.';$this->redirect($route);}}
-    private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if(!$u['password_hash']||!$this->accounts->username($uid)||!Profile::complete($this->db,$uid)){if(empty($this->db->one('SELECT phone FROM m_users WHERE id=?',[$uid])['phone'])&&$this->db->one("SELECT id FROM m_auth_identities WHERE user_id=? AND provider='eitaa'",[$uid])){return '/account/identify';}return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
+    private function afterLogin():string{$uid=$_SESSION['issued_user']??($this->actor['user_id']??null);unset($_SESSION['issued_user']);if($this->realm==='site'&&$uid){$u=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$uid]);if($this->needsEitaaPhone($uid)){return '/account/identify';}if(!$u['password_hash']||!$this->accounts->username($uid)||!Profile::complete($this->db,$uid)){return '/account/complete';}}$route=$_SESSION['return_to']??'/account';unset($_SESSION['return_to']);return is_string($route)&&str_starts_with($route,'/')&&!str_starts_with($route,'//')&&!preg_match('/[\r\n]/',$route)?$route:'/account';}
+    private function eitaaResult(array $result):void
+    {
+        if(isset($result['pending_eitaa'])){$_SESSION['pending_eitaa']=$result['pending_eitaa'];unset($_SESSION['otp_flow']);session_regenerate_id(true);$this->success('/account/identify');return;}
+        unset($_SESSION['pending_eitaa']);if($result['purpose']==='login'){$this->issue($result['user_id'],'eitaa');}$this->success($this->afterLogin());
+    }
+    private function needsEitaaPhone(string $uid):bool
+    {return empty($this->db->one('SELECT phone FROM m_users WHERE id=?',[$uid])['phone'])&&(bool)$this->db->one("SELECT id FROM m_auth_identities WHERE user_id=? AND provider='eitaa'",[$uid]);}
     private function issue(string $user,string $method,?string $admin=null):void
     {
         if($this->actor){$this->sessions->revoke($this->actor['user_id'],$this->realm,$this->actor['session_id']);}
+        unset($_SESSION['pending_eitaa']);
         $_SESSION['issued_user']=$user;$s=$this->sessions->issue($user,$this->realm,$method,$admin,$_SERVER['HTTP_USER_AGENT']??'');
         setcookie($this->cookie,$s['token'],['expires'=>$s['expires_at'],'path'=>'/','secure'=>$this->secure(),'httponly'=>true,'samesite'=>'Lax']);
         session_regenerate_id(true);$_SESSION['csrf']=bin2hex(random_bytes(32));
@@ -81,7 +89,7 @@ final class Application
     {
         if($this->realm!=='site'||!$this->actor){return;}
         $protected=in_array($this->path,['/account','/account/security','/account/profile','/account/rules','/account/phone','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
-        if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
+        if(($protected||$this->path==='/account/complete')&&$this->needsEitaaPhone($this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$this->redirect('/account/identify');}throw new Problem('PHONE_REQUIRED','ابتدا شماره را تأیید کنید تا حساب قبلی شما شناسایی شود.',409);}if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
         if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect($this->afterLogin());}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
     }
     public function run():void
@@ -117,11 +125,11 @@ final class Application
             if($provider==='google'){if($this->api){$this->json($f);}else{header("Content-Security-Policy: default-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'");header('Location: '.$f['url'],true,303);}}
             else{
                 $data=$this->text('init_data',16384);$cached=$_SESSION['eitaa_context']??null;unset($_SESSION['eitaa_context']);
-                if(is_array($cached)&&($cached['expires']??0)>time()&&isset($cached['proof'])&&($data===''||hash_equals($cached['fingerprint'],hash('sha256',$data)))){$r=$this->external->eitaaCaptured($f['state'],$cached['proof'],$_SESSION['external_browser'],$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
-                if($data!==''){$r=$this->external->eitaa($f['state'],$data,$_SESSION['external_browser'],$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
+                if(is_array($cached)&&($cached['expires']??0)>time()&&isset($cached['proof'])&&($data===''||hash_equals($cached['fingerprint'],hash('sha256',$data)))){$r=$this->external->eitaaCaptured($f['state'],$cached['proof'],$_SESSION['external_browser'],$this->actor);$this->eitaaResult($r);return;}
+                if($data!==''){$r=$this->external->eitaa($f['state'],$data,$_SESSION['external_browser'],$this->actor,$ip);$this->eitaaResult($r);return;}
                 if($this->api){$this->json(['launch_url'=>'https://eitaa.com/morshed_app']);}else{header('Location: https://eitaa.com/morshed_app',true,303);}}return;
         }
-        if($this->path==='/auth/eitaa/complete'){$r=$this->external->eitaa($this->text('state',64),$this->text('init_data',16384),$_SESSION['external_browser']??'',$this->actor,$ip);if($r['purpose']==='login'){$this->issue($r['user_id'],'eitaa');}$this->success($this->afterLogin());return;}
+        if($this->path==='/auth/eitaa/complete'){$r=$this->external->eitaa($this->text('state',64),$this->text('init_data',16384),$_SESSION['external_browser']??'',$this->actor,$ip);$this->eitaaResult($r);return;}
         if($this->path==='/auth/otp/request'){
             $purpose=$this->text('purpose',20);if(!in_array($purpose,['login','reset'],true)){throw new Problem('INVALID_PURPOSE','درخواست معتبر نیست.');}
             $id=$this->accounts->requestCode($this->text('phone',32),$purpose,$ip);$this->rememberCode($id,$purpose);if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($id,$purpose);return;
@@ -129,13 +137,19 @@ final class Application
         if($this->path==='/auth/otp/resend'){
             $flow=$_SESSION['otp_flow']??[];$id=$this->text('challenge_id',32);
             if(!isset($flow['id'])||!hash_equals($flow['id'],$id)){throw new Problem('INVALID_CODE','درخواست ارسال متعلق به این مرورگر نیست؛ شماره را دوباره وارد کنید.',403);}
-            $next=$this->accounts->resendCode($id,$flow['purpose'],$ip);$this->rememberCode($next,$flow['purpose']);if(isset($flow['eitaa_source'])){$_SESSION['otp_flow']['eitaa_source']=$flow['eitaa_source'];}if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($next,$flow['purpose']);return;
+            $next=$this->accounts->resendCode($id,$flow['purpose'],$ip);$this->rememberCode($next,$flow['purpose']);if(isset($flow['eitaa_source'])){$_SESSION['otp_flow']['eitaa_source']=$flow['eitaa_source'];}if(isset($flow['pending_eitaa'])){$_SESSION['otp_flow']['pending_eitaa']=$flow['pending_eitaa'];}if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($next,$flow['purpose']);return;
         }
         if($this->path==='/auth/otp/verify'){
-            $flow=$_SESSION['otp_flow']??[];if(isset($flow['eitaa_source'])&&(!$this->actor||$flow['eitaa_source']!==$this->actor['user_id']||!hash_equals($flow['id'],$this->text('challenge_id',32)))){throw new Problem('INVALID_STATE','نشست اتصال حساب تغییر کرده است.',401);}$id=$this->accounts->verifyLogin($this->text('challenge_id',32),$this->text('code',12),$ip);if(isset($flow['eitaa_source'])){$this->external->connectVerifiedPhone($this->actor,$id,'verified_sms');}unset($_SESSION['otp_flow']);$this->issue($id,'otp');$this->success($this->afterLogin());return;
+            $flow=$_SESSION['otp_flow']??[];if(isset($flow['eitaa_source'])&&(!$this->actor||$flow['eitaa_source']!==$this->actor['user_id']||!hash_equals($flow['id'],$this->text('challenge_id',32)))){throw new Problem('INVALID_STATE','نشست اتصال حساب تغییر کرده است.',401);}if(isset($flow['pending_eitaa'])){if($this->actor||!isset($_SESSION['pending_eitaa'])||$_SESSION['pending_eitaa']!==$flow['pending_eitaa']||!hash_equals($flow['id'],$this->text('challenge_id',32))){throw new Problem('INVALID_STATE','نشست تأیید شماره تغییر کرده است.',401);}$this->external->pendingSubject($flow['pending_eitaa']);}$id=$this->accounts->verifyLogin($this->text('challenge_id',32),$this->text('code',12),$ip);if(isset($flow['pending_eitaa'])){$id=$this->external->pendingSms($flow['pending_eitaa'],$id);unset($_SESSION['pending_eitaa']);}if(isset($flow['eitaa_source'])){$this->external->connectVerifiedPhone($this->actor,$id,'verified_sms');}unset($_SESSION['otp_flow']);$this->issue($id,'otp');$this->success($this->afterLogin());return;
         }
         if($this->path==='/auth/password/reset'){
             $this->accounts->resetPassword($this->text('challenge_id',32),$this->text('code',12),$this->text('new_password',256),$ip);unset($_SESSION['otp_flow']);unset($_SESSION['return_to'],$_SESSION['otp_flow'],$_SESSION['external_browser']);$this->success($this->realm==='site'?'/':'/login');return;
+        }
+        if(in_array($this->path,['/me/eitaa/contact','/me/eitaa/phone/request'],true)&&isset($_SESSION['pending_eitaa'])){
+            $pending=$_SESSION['pending_eitaa'];$this->external->pendingSubject($pending);
+            if($this->actor){throw new Problem('INVALID_STATE','نشست ورود تغییر کرده است؛ دوباره ورود ایتا را آغاز کنید.',401);}
+            if($this->path==='/me/eitaa/contact'){$uid=$this->external->pendingContact($pending,$this->text('contact_data',16384),$ip);unset($_SESSION['pending_eitaa'],$_SESSION['otp_flow']);$this->issue($uid,'eitaa');$this->success($this->afterLogin());return;}
+            $id=$this->accounts->requestCode($this->text('phone',32),'login',$ip);$this->rememberCode($id,'login');$_SESSION['otp_flow']['pending_eitaa']=$pending;if(!$this->api){$this->redirect('/auth/otp/code');}$this->codeForm($id,'login');return;
         }
         $a=$this->requireActor();
         switch($this->path){
@@ -200,6 +214,7 @@ final class Application
         if($this->path==='/auth/eitaa/start'){header('Location: https://eitaa.com/morshed_app',true,303);return;}
         if($this->path==='/password/recover'){$this->view->page('بازیابی رمز','recover',[],$error);return;}
         if($this->path==='/legal'){$this->view->page('قوانین پایه','public-legal',['legal'=>$this->legal->current()],$error);return;}
+        if($this->path==='/account/identify'&&isset($_SESSION['pending_eitaa'])&&!$this->actor){$this->external->pendingSubject($_SESSION['pending_eitaa']);$this->view->page('تأیید شماره و یافتن حساب','identify-account',[],$error);return;}
         $a=$this->requireActor();
         switch($this->path){
             case '/me':$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at FROM m_users WHERE id=?',[$a['user_id']]);$this->json(['user'=>$u,'realm'=>'site']);return;

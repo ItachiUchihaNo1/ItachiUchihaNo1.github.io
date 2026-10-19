@@ -161,6 +161,17 @@ try:
     status,body,_=eitaaclient.request('/api/v1/me');assert status==200 and json.loads(body)['user']['id']==fixture['user_id']
     html=assert_status(eitaaclient,'/account',200);assert 'primary_test_user' in html and 'تأیید شماره از ایتا' not in html and 'account-hub' in html
     html=assert_status(eitaaclient,'/account/security',200);assert 'optional-connections' in html
+    pendingclient=Client(cfg['origins']['site']);pendingclient.request('/api/v1/csrf')
+    pendingsid=next(c.value for c in pendingclient.jar if c.name=='morshed_dev_csrf_site')
+    pendingbridge=json.loads(subprocess.check_output(phpcmd+[str(app/'tests/eitaa_pending_fixture.php'),str(configphp),pendingsid],text=True,encoding='utf-8'))
+    cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':'test-only-eitaa-token-123456'};config.write_text(json.dumps(cfg),encoding='utf-8')
+    html=assert_status(pendingclient,'/account/identify',200);assert 'data-eitaa-contact' in html and '/account/complete' not in html
+    status,body,_=pendingclient.post('/auth/otp/verify',{'challenge_id':'0'*32,'code':pendingbridge['code']});assert status==401 and 'INVALID_STATE' in body
+    status,body,_=pendingclient.post('/auth/otp/verify',{'challenge_id':pendingbridge['challenge_id'],'code':pendingbridge['code']});assert status==200 and 'complete' in json.loads(body)['redirect']
+    status,body,_=pendingclient.request('/api/v1/me');assert status==200 and json.loads(body)['user']['id']==pendingbridge['owner']
+    cfg.pop('eitaa');config.write_text(json.dumps(cfg),encoding='utf-8')
+    ok('pending Eitaa login binds OTP to its browser and opens the existing phone user after verification')
+
     ok('Eitaa first login identifies the existing SMS account before profile entry and retains the original internal user ID')
 
     redirectclient=Client(cfg['origins']['site']);redirectclient.request('/favicon.ico')

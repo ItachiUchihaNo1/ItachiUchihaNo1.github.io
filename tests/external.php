@@ -61,13 +61,13 @@ check('signed contact cannot be replayed',fn()=>rejects('ASSERTION_REPLAY',fn()=
 $beforeCapture=(int)$db->run('SELECT COUNT(*) FROM m_users')->fetchColumn();$captured=$ext->captureEitaa(initData('777888999',time()),'capture-test');
 check('verified launch context alone never creates an account',fn()=>eq((int)$db->run('SELECT COUNT(*) FROM m_users')->fetchColumn(),$beforeCapture));
 $captureFlow=$ext->begin('eitaa','login',null,$browser,'capture-test');$capturedLogin=$ext->eitaaCaptured($captureFlow['state'],$captured,$browser,null);
-check('explicit login consumes captured proof after public browsing',fn()=>eq($db->run("SELECT subject FROM m_auth_identities WHERE user_id=? AND provider='eitaa'",[$capturedLogin['user_id']])->fetchColumn(),'777888999'));
+check('new Eitaa login waits for verified phone without creating a second user',function()use($capturedLogin,$beforeCapture,$db){eq($capturedLogin['pending_eitaa']['subject'],'777888999');eq((int)$db->run('SELECT COUNT(*) FROM m_users')->fetchColumn(),$beforeCapture);});
 $replayFlow=$ext->begin('eitaa','login',null,$browser,'capture-test');
 check('captured launch proof cannot be reused for another login',fn()=>rejects('ASSERTION_REPLAY',fn()=>$ext->eitaaCaptured($replayFlow['state'],$captured,$browser,null)));
 
 check('URL pasted as Google Client ID is rejected before redirecting to Google',function()use($db,$audit,$rate,$http,$settings,$browser){$bad=$settings;$bad['google']['client_id']='https://123456789-testclient.apps.googleusercontent.com';$service=new ExternalAccounts($db,$audit,$rate,$http,$bad);rejects('GOOGLE_CLIENT_CONFIGURATION',fn()=>$service->begin('google','login',null,$browser,'bad-config'));});
 $db->run('DELETE FROM m_rate_limits');
-function eitaaSource(string $subject):array{global $ext,$browser,$sessions;$f=$ext->begin('eitaa','login',null,$browser,'phone-link-test');$u=$ext->eitaa($f['state'],initData($subject,time()),$browser,null,'phone-link-test');$s=$sessions->issue($u['user_id'],'site','eitaa');return [$sessions->resolve($s['token'],'site'),$s];}
+function eitaaSource(string $subject):array{global $db,$sessions;$uid=Security::id();$db->run('INSERT INTO m_users(id,created_at,updated_at) VALUES(?,?,?)',[$uid,time(),time()]);$db->run('INSERT INTO m_auth_identities(id,user_id,provider,subject,created_at) VALUES(?,?,?,?,?)',[Security::id(),$uid,'eitaa',$subject,time()]);$s=$sessions->issue($uid,'site','eitaa');return [$sessions->resolve($s['token'],'site'),$s];}
 function phoneOwner(string $phone):string{global $accounts,$sms;$id=$accounts->requestCode($phone,'login','phone-owner-test');return $accounts->verifyLogin($id,$sms->codes[$phone],'phone-owner-test');}
 [$source,$sourceSession]=eitaaSource('812345671');$owner=phoneOwner('09122223331');$db->run('UPDATE m_users SET display_name=? WHERE id=?',['Existing profile unchanged',$owner]);
 $assertion=contactData('812345671','09122223331');
@@ -84,5 +84,23 @@ check('existing destination Eitaa identity is never overwritten',fn()=>rejects('
 [$unverifiedSource]=eitaaSource('812345675');
 check('a destination without a proved phone cannot be linked',fn()=>rejects('INVALID_ASSERTION',fn()=>$ext->connectVerifiedPhone($unverifiedSource,$second['user_id'],'verified_sms')));
 check('source with an already verified different phone cannot switch ownership',fn()=>rejects('PHONE_READ_ONLY',fn()=>$ext->contact($freshActor,contactData('123456789','09122223332'),'phone-link-test')));
+
+$db->run('DELETE FROM m_rate_limits');
+$phoneExisting=phoneOwner('09123334441');$db->run('UPDATE m_users SET display_name=? WHERE id=?',['Keep my existing account',$phoneExisting]);
+$pending=$capturedLogin['pending_eitaa'];$count=(int)$db->run('SELECT COUNT(*) FROM m_users')->fetchColumn();
+check('pending contact must prove the same Eitaa subject',fn()=>rejects('INVALID_ASSERTION',fn()=>$ext->pendingContact($pending,contactData('777888998','09123334441'),'pending-test')));
+check('signed Eitaa contact reuses existing SMS user without another user row',function()use($ext,$pending,$phoneExisting,$count,$db){eq($ext->pendingContact($pending,contactData('777888999','989123334441'),'pending-test'),$phoneExisting);eq((int)$db->run('SELECT COUNT(*) FROM m_users')->fetchColumn(),$count);eq($db->run('SELECT display_name FROM m_users WHERE id=?',[$phoneExisting])->fetchColumn(),'Keep my existing account');});
+check('future Eitaa login resolves to the exact existing SMS account',function()use($ext,$browser,$phoneExisting){$f=$ext->begin('eitaa','login',null,$browser,'repeat-test');$result=$ext->eitaa($f['state'],initData('777888999',time()+1),$browser,null,'repeat-test');eq($result['user_id'],$phoneExisting);});
+$f=$ext->begin('eitaa','login',null,$browser,'pending-test');$freshPending=$ext->eitaa($f['state'],initData('777888991',time()),$browser,null,'pending-test')['pending_eitaa'];
+check('unverified pending login has no identity or user record',function()use($db){eq($db->one("SELECT id FROM m_auth_identities WHERE provider='eitaa' AND subject='777888991'"),null);});
+$created=$ext->pendingContact($freshPending,contactData('777888991','+989123334442'),'pending-test');
+check('Eitaa-first phone account is reused by later OTP login',function()use($created){eq(phoneOwner('09123334442'),$created);});
+$f=$ext->begin('eitaa','login',null,$browser,'pending-test');$smsPending=$ext->eitaa($f['state'],initData('777888992',time()),$browser,null,'pending-test')['pending_eitaa'];$smsTarget=phoneOwner('09123334443');
+check('pending Eitaa identity attaches after verified SMS to the same user',fn()=>eq($ext->pendingSms($smsPending,$smsTarget),$smsTarget));
+check('expired pending proof cannot attach to a phone owner',fn()=>rejects('INVALID_STATE',fn()=>$ext->pendingSms(array_replace($smsPending,['expires'=>time()-1]),$smsTarget)));
+check('pending SMS cannot attach to an unverified user',fn()=>rejects('INVALID_ASSERTION',fn()=>$ext->pendingSms($smsPending,$second['user_id'])));
+$f=$ext->begin('eitaa','login',null,$browser,'pending-test');$conflicting=$ext->eitaa($f['state'],initData('777888993',time()),$browser,null,'pending-test')['pending_eitaa'];
+check('different Eitaa identity never overwrites an occupied phone account',fn()=>rejects('IDENTITY_CONFLICT',fn()=>$ext->pendingSms($conflicting,$phoneExisting)));
+check('pending retry after successful phone binding stays on the same user',fn()=>eq($ext->pendingSms($smsPending,$smsTarget),$smsTarget));
 
 echo "EXTERNAL RESULT: $passed passed, $failed failed\n";exit($failed?1:0);

@@ -96,13 +96,51 @@ final class ExternalAccounts
             $this->audit->notify($target,'ورود ایتا به حساب شما متصل شد','پس از تأیید مالکیت شماره، ورود با ایتا به همین حساب متصل شد.');return $target;
     }
 
+    /** Pending data is kept only in the server's CSRF session after verified Eitaa login. */
+    public function pendingContact(array $pending,string $data,string $ip):string
+    {
+        $this->pendingSubject($pending);$c=$this->enabled('eitaa');$this->rate->hit('eitaa-pending-contact:'.$ip,6,900);
+        try{$proof=(new EitaaInitDataVerifier($c['app_token'],60))->verifyFields($data,time());$contact=json_decode($proof['fields']['contact']??'',true,8,JSON_THROW_ON_ERROR|JSON_BIGINT_AS_STRING);
+            if(!is_array($contact)||!is_string($contact['phone_number']??null)||(string)($contact['user_id']??'')!==$pending['subject']){throw new \DomainException('Contact subject mismatch');}
+            $raw=$contact['phone_number'];if(preg_match('/^98[0-9]{10}$/D',$raw)){$raw='+'.$raw;}$phone=Security::phone($raw);
+        }catch(\Throwable $e){throw new Problem('INVALID_ASSERTION','شمارهٔ امضاشده با حساب ایتای در حال ورود مطابقت ندارد؛ از تأیید پیامکی استفاده کنید.',401);}
+        $reply=$this->http->request('https://eitaayar.ir/api/app/verify',['token'=>$c['app_token'],'hash'=>$proof['replay_key'],'ip'=>$ip]);if(($reply['ok']??false)!==true){throw new Problem('INVALID_ASSERTION','اعتبار رسمی شمارهٔ ایتا تأیید نشد.',401);}
+        return $this->db->tx(function()use($pending,$phone,$proof){
+            $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$key=hash('sha256','eitaa-contact:'.$proof['replay_key']);
+            if($this->db->one('SELECT assertion_hash FROM m_identity_assertions WHERE assertion_hash=?',[$key])){throw new Problem('ASSERTION_REPLAY','این تأیید قبلاً استفاده شده است.',401);}
+            $uid=$this->finishPendingPhone($pending,$phone);
+            $this->db->run('INSERT INTO m_identity_assertions VALUES(?,?,?,?)',[$key,'eitaa',time()+86400,time()]);return $uid;
+        });
+    }
+    public function pendingSubject(array $pending):string
+    {
+        if(!is_string($pending['subject']??null)||!preg_match('/^[1-9][0-9]{0,19}$/D',$pending['subject'])||($pending['expires']??0)<=time()){throw new Problem('INVALID_STATE','مهلت تأیید شماره پایان یافته است؛ ورود با ایتا را دوباره آغاز کنید.',401);}return $pending['subject'];
+    }
+    /** Called only after this browser's OTP challenge has proved the destination user. */
+    public function pendingSms(array $pending,string $target):string
+    {
+        $this->enabled('eitaa');$this->pendingSubject($pending);
+        return $this->db->tx(function()use($pending,$target){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$u=$this->db->one('SELECT phone,phone_verified_at FROM m_users WHERE id=? FOR UPDATE',[$target]);if(!$u||!$u['phone_verified_at']||empty($u['phone'])){throw new Problem('INVALID_ASSERTION','شمارهٔ مقصد تأیید نشده است.',403);}return $this->finishPendingPhone($pending,$u['phone']);});
+    }
+    private function finishPendingPhone(array $pending,string $phone):string
+    {
+        $subject=$this->pendingSubject($pending);
+        $identity=$this->db->one("SELECT i.user_id,u.phone,u.status FROM m_auth_identities i JOIN m_users u ON u.id=i.user_id WHERE i.provider='eitaa' AND i.subject=? FOR UPDATE",[$subject]);
+        $owner=$this->db->one('SELECT id,phone_verified_at,status FROM m_users WHERE phone=? FOR UPDATE',[$phone]);
+        if($owner&&($owner['status']!=='active'||!$owner['phone_verified_at'])){throw new Problem('ACCESS_DENIED','حساب مرتبط با این شماره قابل ورود نیست.',403);}
+        if($identity){if($identity['status']!=='active'||$identity['phone']!==$phone||!$owner||$identity['user_id']!==$owner['id']){throw new Problem('IDENTITY_CONFLICT','اتصال حساب در زمان تأیید تغییر کرده است؛ دوباره وارد شوید.',409);}return $owner['id'];}
+        if($owner){$uid=$owner['id'];if($this->db->one("SELECT id FROM m_auth_identities WHERE user_id=? AND provider='eitaa'",[$uid])){throw new Problem('IDENTITY_CONFLICT','این شماره به حساب ایتای دیگری متصل است؛ از پشتیبانی پیگیری کنید.',409);}}
+        else{$uid=Security::id();$now=time();$this->db->run('INSERT INTO m_users(id,phone,phone_verified_at,created_at,updated_at) VALUES(?,?,?,?,?)',[$uid,$phone,$now,$now,$now]);}
+        $this->insert($uid,'eitaa',$subject);$this->audit->add($uid,'site','identity.eitaa.linked_after_verified_phone');return $uid;
+    }
+
     private function finish(string $provider,array $proof,array $flow,?array $a):array
     {return $this->db->tx(function()use($provider,$proof,$flow,$a){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$hash=hash('sha256',$provider.':'.$proof['replay_key']);if($this->db->one('SELECT assertion_hash FROM m_identity_assertions WHERE assertion_hash=?',[$hash])){throw new Problem('ASSERTION_REPLAY','این تأیید هویت قبلاً مصرف شده است.',401);}
         $identity=$this->db->one('SELECT i.user_id,u.status FROM m_auth_identities i JOIN m_users u ON u.id=i.user_id WHERE i.provider=? AND i.subject=?',[$provider,$proof['subject']]);
         if($flow['purpose']==='reauth'){if(!$identity||$identity['user_id']!==$a['user_id']){throw new Problem('IDENTITY_MISMATCH','این حساب خارجی متعلق به حساب فعلی نیست.',403);}$uid=(new Policy($this->db))->user($a);$this->db->run('UPDATE m_auth_sessions SET auth_at=? WHERE id=?',[time(),$a['session_id']]);}
         elseif($flow['purpose']==='link'){$this->recent($a??[]);$uid=$a['user_id'];if($identity&&$identity['user_id']!==$uid){throw new Problem('IDENTITY_CONFLICT','این روش به حساب دیگری متصل است؛ ادغام خودکار انجام نمی‌شود. از پشتیبانی پیگیری کنید.',409);}if(!$identity){if($this->db->one('SELECT id FROM m_auth_identities WHERE user_id=? AND provider=?',[$uid,$provider])){throw new Problem('IDENTITY_CONFLICT','این حساب قبلاً اتصال دیگری برای این سرویس دارد.',409);}$this->insert($uid,$provider,$proof['subject']);}}
         else{if($identity){$uid=$identity['user_id'];if($identity['status']!=='active'){throw new Problem('ACCESS_DENIED','حساب محدود شده است.',403);}}
-            else{$uid=Security::id();$name=substr(is_string($proof['name']??null)?$proof['name']:'کاربر مرشد',0,100);if(!preg_match('//u',$name)){$name='کاربر مرشد';}$this->db->run('INSERT INTO m_users(id,display_name,created_at,updated_at) VALUES(?,?,?,?)',[$uid,$name,time(),time()]);$this->insert($uid,$provider,$proof['subject']);}}
+            else{if($provider==='eitaa'){$this->db->run('INSERT INTO m_identity_assertions VALUES(?,?,?,?)',[$hash,$provider,time()+86400,time()]);return ['purpose'=>'login','pending_eitaa'=>['subject'=>$proof['subject'],'expires'=>time()+600]];}$uid=Security::id();$name=substr(is_string($proof['name']??null)?$proof['name']:'کاربر مرشد',0,100);if(!preg_match('//u',$name)){$name='کاربر مرشد';}$this->db->run('INSERT INTO m_users(id,display_name,created_at,updated_at) VALUES(?,?,?,?)',[$uid,$name,time(),time()]);$this->insert($uid,$provider,$proof['subject']);}}
         $this->db->run('INSERT INTO m_identity_assertions VALUES(?,?,?,?)',[$hash,$provider,time()+86400,time()]);$this->audit->add($uid,'site','identity.'.$provider.'.'.$flow['purpose']);$this->audit->notify($uid,'ورود یا اتصال حساب','یک عملیات احراز هویت خارجی در حساب شما ثبت شد.');return ['user_id'=>$uid,'purpose'=>$flow['purpose']];});}
     private function insert(string $uid,string $provider,string $subject):void
     {$this->db->run('INSERT INTO m_auth_identities(id,user_id,provider,subject,created_at) VALUES(?,?,?,?,?)',[Security::id(),$uid,$provider,$subject,time()]);}
