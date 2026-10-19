@@ -7,6 +7,10 @@ final class View
     private int $fieldSerial=0;
     public function __construct(public array $config,public string $realm,public string $csrf,public ?array $actor=null) {}
     public function h(mixed $v):string{return htmlspecialchars((string)($v??''),ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8');}
+    public function paragraphs(string $text):string
+    {
+        $out='';foreach(preg_split('/\R[ \t]*\R(?:[ \t]*\R)*/u',trim($text))?:[] as $part){if(trim($part)!==''){$out.='<p>'.nl2br($this->h(trim($part))).'</p>';}}return $out;
+    }
     public function icon(string $name):string
     {
         $paths=['security'=>'M5 11h14v10H5ZM8 11V7a4 4 0 0 1 8 0v4','eye'=>'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12ZM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0','home'=>'M3 10 12 3l9 7v11h-6v-7H9v7H3Z','users'=>'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z','calendar'=>'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM8 14h2M14 14h2M8 18h2','book'=>'M12 6v15M3 3c4-1 7 0 9 3 2-3 5-4 9-3v15c-4-1-7 0-9 3-2-3-5-4-9-3Z','user'=>'M20 21v-2a7 7 0 0 0-14 0v2M17 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z','chat'=>'M21 11a9 9 0 0 1-9 9 10 10 0 0 1-4-.8L3 21l1.8-5A9 9 0 1 1 21 11ZM8 10h8M8 14h5','arrow'=>'M14 5l-7 7 7 7M7 12h14','topic'=>'M4 4h6v6H4ZM14 4h6v6h-6ZM4 14h6v6H4ZM14 14h6v6h-6Z'];
