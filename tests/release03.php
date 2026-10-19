@@ -31,10 +31,10 @@ $input=['mentor_id'=>$uid,'title'=>'پرونده ساختاریافته آزمو
 $draft=$cases->save($aa,$input);$id=$draft['id'];$eid=$draft['experience_id'];$input+=['experience_id'=>$eid,'base_version_id'=>$id];$again=$cases->save($aa,$input);
 check('experience edits preserve revision history while lists show latest case',fn()=>eq($again['id']===$id,false));$id=$again['id'];$input['base_version_id']=$id;
 $cases->submit($aa,$id);
-check('publication requires owner approval even if admin created the case',fn()=>rejects('EXPERIENCE_INCOMPLETE',fn()=>$c->review($aa,$id,'approved','')));
+check('complete administrative case does not require owner acceptance',fn()=>eq($cases->missing($cases->details($id)),[]));
 check('administrator cannot impersonate owner approval',fn()=>rejects('ACCESS_DENIED',fn()=>$cases->ownerApprove($aa,$id)));
-$cases->ownerApprove($mentor,$id);$c->review($aa,$id,'approved','');
-check('failed outcome can be published after actual owner and admin approval',fn()=>eq($c->experience($eid)['version_id'],$id));
+$c->review($aa,$id,'approved','');
+check('failed outcome can be published by content administration without owner workflow',fn()=>eq($c->experience($eid)['version_id'],$id));
 check('public detail projection excludes all private sources and notes',function()use($cases,$id){$d=$cases->details($id,true);eq(isset($d['source_text']),false);eq(isset($d['confidential_notes']),false);eq($d['outcome'],'failure');});
 check('public filters use actual structured target audience and outcome',function()use($c,$eid){eq($c->experiences(['q'=>'ساختاریافته','target_audience'=>'اردو','outcome'=>'failure'])[0]['id'],$eid);eq($c->experiences(['q'=>'ساختاریافته','outcome'=>'success']),[]);});
 $next=$cases->save($aa,array_replace($input,['title'=>'ویرایش جدید منتظر تأیید']));

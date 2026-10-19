@@ -65,3 +65,5 @@ button:not(.secondary){background:var(--teal);color:white}.prose{white-space:pre
 @media(max-width:650px){.admin-page-heading{align-items:stretch;flex-direction:column;gap:16px}.compact-user-head{display:none}.compact-user-row{grid-template-columns:1fr auto;gap:12px 16px}.compact-user-row>code{grid-column:1;grid-row:2}.compact-user-row>.tag{grid-column:2;grid-row:1}.compact-user-row>.secondary{grid-column:2;grid-row:2}.mentor-invite{padding:20px}.mentor-invite .grid2{gap:0}.mentor-row-heading{gap:12px}.mentor-admin-row>.row{gap:16px}.mentor-manage form>button{width:100%}}
 
 .admin-shell .search>input{min-width:0;flex:1}.admin-shell .search>button{white-space:nowrap;flex-shrink:0}
+
+.mentor-role-badge{display:inline-flex;align-items:center;background:#def5ec;color:#006e61;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700;margin-inline:7px;vertical-align:middle}.account-welcome .mentor-role-badge{background:#ffffff30;color:white}.mentor-manage form{display:block}.mentor-manage textarea{min-height:110px}

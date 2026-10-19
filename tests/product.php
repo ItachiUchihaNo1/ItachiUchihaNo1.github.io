@@ -17,7 +17,7 @@ check('site actor cannot impersonate administrator for mentor creation',fn()=>re
 check('content administrator cannot activate or invite mentors',fn()=>rejects('ACCESS_DENIED',fn()=>$c->invite($ca,['user_id'=>$mentor['user_id'],'headline'=>'عنوان','bio'=>'متن'])));
 $c->invite($aa,['user_id'=>$mentor['user_id'],'headline'=>'آموزگار باتجربه','bio'=>'تجربه واقعی اداره کلاس']);
 check('invited mentor is not publicly visible',fn()=>eq(count($c->mentors()),0));
-check('mentor cannot be activated before accepting invitation',fn()=>rejects('INVITE_NOT_ACCEPTED',fn()=>$c->mentorState($aa,$mentor['user_id'],'active')));
+
 check('invitation requires acceptance of current base terms',fn()=>rejects('TERMS_REQUIRED',fn()=>$c->acceptInvite($mentor)));
 $v=$legal->current();$legal->accept($mentor['user_id'],$v['id']);$c->acceptInvite($mentor);$c->mentorProfile($mentor,['headline'=>'آموزگار باتجربه','bio'=>'روش عملی مدیریت کلاس','terms'=>[$topic,$issue]]);$c->mentorState($aa,$mentor['user_id'],'active');
 check('mentor query combines Persian normalization and topic filter',fn()=>eq($c->mentors(['q'=>'كلاس','term'=>$topic])[0]['user_id'],$mentor['user_id']));

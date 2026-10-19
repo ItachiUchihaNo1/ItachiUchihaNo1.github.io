@@ -97,12 +97,28 @@ final class Administration
             $uid=Security::id();$this->db->run('INSERT INTO m_users(id,password_hash,created_at,updated_at) VALUES(?,?,?,?)',[$uid,$hash,time(),time()]);
             \Morshed\Identity\Profile::save($this->db,$uid,$profile);
             $this->db->run("INSERT INTO m_auth_identities VALUES(?,?,'local_username',?,?)",[Security::id(),$uid,$username,time()]);
-            if(($d['invite_mentor']??'')==='1'){
-                $headline=\Morshed\Product\Policy::text($d['headline']??'',180);$bio=\Morshed\Product\Policy::text($d['bio']??'',20000);
-                $this->db->run('INSERT INTO m_mentors(user_id,headline,bio,invited_at,updated_at) VALUES(?,?,?,?,?)',[$uid,$headline,$bio,time(),time()]);$this->db->run('INSERT INTO m_schedule_settings(mentor_id) VALUES(?)',[$uid]);$this->audit->notify($uid,'دعوت به مرشد','مدیریت شما را به مرشدشدن دعوت کرده است؛ دعوت را از پنل مرشد بررسی کنید.','/mentor');
-            }
+            $role=$d['role']??'user';$this->assignUserRole($uid,is_string($role)?$role:'',$d);
             $this->audit->add($actor['user_id'],'admin','access.user_created',$uid);return $uid;
         });
+    }
+    private function assignUserRole(string $target,string $role,array $d=[]):void
+    {
+        if(!in_array($role,['user','mentor'],true)){throw new Problem('INVALID_ROLE','نقش کاربر یا مرشد را انتخاب کنید.');}
+        $u=$this->db->one("SELECT id,display_name FROM m_users WHERE id=? AND status='active' FOR UPDATE",[$target]);
+        if(!$u||!empty(\Morshed\Identity\Profile::get($this->db,$target)['deleted_at'])){throw new Problem('NOT_FOUND','حساب فعال پیدا نشد.',404);}
+        if($role==='user'){$this->db->run("UPDATE m_mentors SET status='restricted',updated_at=? WHERE user_id=?",[time(),$target]);return;}
+        $old=$this->db->one('SELECT headline,bio FROM m_mentors WHERE user_id=?',[$target]);
+        $headline=\Morshed\Product\Policy::text(($d['headline']??'')?:($old['headline']??($u['display_name']?:'صاحب تجربه')),600,1);
+        if(preg_match_all('/./us',$headline)>180){throw new Problem('INVALID_INPUT','عنوان فعالیت حداکثر ۱۸۰ نویسه دارد.');}
+        $bio=\Morshed\Product\Policy::text($d['bio']??($old['bio']??''),20000,0);
+        // Role assignment is an administrator decision, never a fabricated user acceptance.
+        $this->db->run("INSERT INTO m_mentors(user_id,headline,bio,status,invited_at,updated_at) VALUES(?,?,?,'active',?,?) ON DUPLICATE KEY UPDATE headline=VALUES(headline),bio=VALUES(bio),status='active',updated_at=VALUES(updated_at)",[$target,$headline,$bio,time(),time()]);
+        $this->db->run('INSERT IGNORE INTO m_schedule_settings(mentor_id) VALUES(?)',[$target]);
+    }
+    public function userRole(array $actor,string $current,string $target,string $role,array $d=[]):void
+    {
+        $this->rate->hit('admin-proof:'.$actor['user_id'],10,900);
+        $this->db->tx(function()use($actor,$current,$target,$role,$d){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->system($actor,$current,true);$this->assignUserRole($target,$role,$d);$this->audit->add($actor['user_id'],'admin','access.user_role_'.$role,$target);});
     }
     public function editUser(array $actor,string $current,string $target,array $d):void
     {

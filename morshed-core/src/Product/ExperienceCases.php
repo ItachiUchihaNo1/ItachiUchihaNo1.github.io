@@ -16,7 +16,7 @@ final class ExperienceCases
     public function missing(array $d):array
     {
         $out=[];foreach(['problem','context','actions','results','lessons'] as $k){if(trim($d[$k]??'')===''){$out[]=self::NARRATIVE[$k];}}
-        if(($d['visibility']??'')!=='public'){$out[]='مجوز نمایش عمومی';}if(empty($d['owner_approved_at'])){$out[]='تأیید همین نسخه توسط صاحب تجربه';}return $out;
+        if(($d['visibility']??'')!=='public'){$out[]='مجوز نمایش عمومی';}return $out;
     }
     private static function field(mixed $value,string $label,int $max,int $min=0):string
     {
@@ -33,7 +33,7 @@ final class ExperienceCases
             $eid=($input['experience_id']??'')?:Security::id();$e=$this->db->one('SELECT * FROM m_experiences WHERE id=? FOR UPDATE',[$eid]);
             $mentor=$e['mentor_id']??($admin?($input['mentor_id']??''):$a['user_id']);
             if(!$admin&&$mentor!==$a['user_id']){throw new Problem('ACCESS_DENIED','تجربه متعلق به شما نیست.',403);}
-            if(!$this->db->one("SELECT m.user_id FROM m_mentors m JOIN m_users u ON u.id=m.user_id WHERE m.user_id=? AND u.status='active'",[$mentor])){throw new Problem('INVALID_MENTOR','صاحب تجربه را از پرونده‌های مرشد انتخاب کنید.');}
+            if(!$this->db->one("SELECT m.user_id FROM m_mentors m JOIN m_users u ON u.id=m.user_id WHERE m.user_id=? AND m.status='active' AND u.status='active'",[$mentor])){throw new Problem('INVALID_MENTOR','صاحب تجربه را از پرونده‌های مرشد انتخاب کنید.');}
             $latest=$this->db->one('SELECT * FROM m_experience_versions WHERE experience_id=? ORDER BY version_no DESC LIMIT 1 FOR UPDATE',[$eid]);
             if(($input['base_version_id']??'')!==($latest['id']??'')){throw new Problem('STALE_VERSION','نسخه تغییر کرده است؛ صفحه را دوباره باز کنید.',409);}
             $title=self::field($input['title']??'','عنوان تجربه',180,1);$term=($input['term_id']??'')?:null;if($term&&!$this->db->one('SELECT id FROM m_terms WHERE id=? AND active=1',[$term])){throw new Problem('INVALID_TOPIC','موضوع معتبر نیست.');}

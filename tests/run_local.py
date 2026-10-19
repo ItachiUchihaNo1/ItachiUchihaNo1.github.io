@@ -175,6 +175,21 @@ try:
     except urllib.error.HTTPError as e:assert e.code==401
     ok('copying site auth token into admin cookie cannot escalate access')
     status,body,_=adminclient.post('/auth/password',{'username':fixture['admin_username'],'password':fixture['admin_password']});assert status==200,(status,body)
+    with site.opener.open(cfg['origins']['site']+'/index.php') as rootresponse:
+        roothtml=rootresponse.read().decode('utf-8');assert rootresponse.status==200 and 'home-search' in roothtml
+    status,body,_=site.post('/mentor/accept',{});assert status==410
+    status,body,_=adminclient.post('/mentors/invite',{});assert status==410
+    ok('bare index.php opens public storefront and retired invitation endpoints cannot mutate data')
+    status,body,_=adminclient.post('/users/role',{'id':fixture['user_id'],'role':'mentor','current_password':fixture['admin_password']});assert status==200,(status,body)
+    hub=assert_status(site,'/account',200);assert 'mentor-role-badge' in hub and 'پنل مرشد' not in hub
+    legacy=assert_status(site,'/mentor',200);assert 'account-hub' in legacy and 'دعوت مدیریت' not in legacy
+    status,body,_=adminclient.post('/users/role',{'id':fixture['user_id'],'role':'user','current_password':fixture['admin_password']});assert status==200,(status,body)
+    ok('admin role assignment immediately adds badge without a mentor panel and can be reversed without deleting account')
+    logoutclient=Client(cfg['origins']['site']);status,body,_=logoutclient.post('/auth/password',{'login':'manual_release03','password':'Eight123'});assert status==200
+    status,body,_=logoutclient.post('/logout',{});assert status==200 and json.loads(body)['redirect']=='/index.php?r=%2F'
+    assert_status(logoutclient,'/api/v1/me',401)
+    ok('site logout revokes only its session and returns to public storefront rather than a broken or forced-login page')
+
     status,body,_=site.request('/api/v1/csrf');site_csrf=json.loads(body)['csrf']
     status,body,_=adminclient.request('/api/v1/legal/create',{'title':'cross-realm','body':'cross-realm'},site_csrf);assert status==419;ok('site CSRF token is invalid in the admin realm')
     status,body,_=site.request('/api/v1/me/profile',{'display_name':'origin-attack'},site_csrf,{'Origin':'https://invalid.example'});assert status==419;ok('foreign Origin cannot mutate an authenticated profile')
@@ -256,10 +271,10 @@ try:
         status,body,_=client.post('/auth/password',{'phone':phone,'password':password});assert status==200,(status,body)
         status,body,_=client.post('/account/complete',{'username':'user_'+phone,'current_password':password,'new_password':password,'first_name':'کاربر','last_name':'آزمون','province':'تهران','city':'تهران','gender':'female'});assert status==200,(status,body)
     for path in ['/mentor','/mentor/experiences','/mentor/experience','/mentor/experience?id='+product['experience_id'],'/mentor/calendar','/sessions','/booking?id='+product['booking_id'],'/session?id='+product['booking_id']]:assert_status(mentorclient,path,200)
-    ok('mentor account renders only its own real panel calendar experiences and sessions')
-    status,body,_=mentorclient.post('/mentor/experience/save',{'title':'<img src=x onerror=alert(1)>','problem':'آزمون متن پایدار','context':'شرایط آزمون','actions':'اقدام آزمون','results':'نتیجه آزمون','lessons':'آموخته آزمون','visibility':'public','owner_approve':'1','term_id':product['topic_id']});assert status==200,(status,body);created=json.loads(body)
+    ok('legacy mentor panel destinations lead back to ordinary account without specialist interface')
+    status,body,_=adminclient.post('/experience/save',{'mentor_id':product['mentor_id'],'title':'<img src=x onerror=alert(1)>','problem':'آزمون متن پایدار','context':'شرایط آزمون','actions':'اقدام آزمون','results':'نتیجه آزمون','lessons':'آموخته آزمون','visibility':'public','owner_approve':'1','term_id':product['topic_id']});assert status==200,(status,body);created=json.loads(body)
     assert_status(site,'/api/v1/experience?id='+created['experience_id'],404)
-    status,body,_=mentorclient.post('/mentor/experience/submit',{'id':created['id']});assert status==200,(status,body)
+    status,body,_=adminclient.post('/experience/submit',{'id':created['id']});assert status==200,(status,body)
     status,body,_=content.post('/experience/review',{'id':created['id'],'decision':'approved','note':''});assert status==200,(status,body)
     html=assert_status(site,'/experience?id='+created['experience_id'],200);assert '&lt;img src=x onerror=alert(1)&gt;' in html and '<img src=x' not in html
     ok('HTTP experience draft submission moderation publication and stored-XSS escaping work end to end')
@@ -303,8 +318,8 @@ try:
     except urllib.error.HTTPError as error:r=error
     body=r.read().decode('utf-8');assert r.status==200,(r.status,body);assetid=json.loads(body)['asset_id']
     assert_status(site,'/api/v1/content/asset?id='+assetid,404)
-    status,body,_=mentorclient.post('/mentor/experience/save',{'experience_id':created['experience_id'],'base_version_id':created['id'],'title':'مستند عمومی','problem':'متن تجربه با مستند','context':'شرایط آزمون','actions':'اقدام آزمون','results':'نتیجه آزمون','lessons':'آموخته آزمون','visibility':'public','owner_approve':'1','asset_ids':[assetid]});assert status==200,(status,body);version=json.loads(body)['id']
-    status,body,_=mentorclient.post('/mentor/experience/submit',{'id':version});assert status==200,(status,body)
+    status,body,_=adminclient.post('/experience/save',{'experience_id':created['experience_id'],'base_version_id':created['id'],'title':'مستند عمومی','problem':'متن تجربه با مستند','context':'شرایط آزمون','actions':'اقدام آزمون','results':'نتیجه آزمون','lessons':'آموخته آزمون','visibility':'public','owner_approve':'1','asset_ids':[assetid]});assert status==200,(status,body);version=json.loads(body)['id']
+    status,body,_=adminclient.post('/experience/submit',{'id':version});assert status==200,(status,body)
     status,body,_=content.post('/experience/review',{'id':version,'decision':'approved','note':''});assert status==200,(status,body)
     with site.opener.open(site.base+'/index.php?r=%2Fcontent%2Fasset&id='+assetid) as r:assert r.headers['Content-Type']=='image/png' and r.read()==image_bytes
     status,body,_=content.post('/experience/unpublish',{'id':created['experience_id']});assert status==200,(status,body)
