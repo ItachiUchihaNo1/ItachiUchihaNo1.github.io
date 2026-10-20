@@ -35,7 +35,8 @@ check('complete administrative case does not require owner acceptance',fn()=>eq(
 check('administrator cannot impersonate owner approval',fn()=>rejects('ACCESS_DENIED',fn()=>$cases->ownerApprove($aa,$id)));
 $c->review($aa,$id,'approved','');
 check('failed outcome can be published by content administration without owner workflow',fn()=>eq($c->experience($eid)['version_id'],$id));
-check('public detail projection excludes all private sources and notes',function()use($cases,$id){$d=$cases->details($id,true);eq(isset($d['source_text']),false);eq(isset($d['confidential_notes']),false);eq($d['outcome'],'failure');});
+check('public detail projection excludes all private sources and notes',function()use($cases,$id){$d=$cases->details($id,true);eq(isset($d['source_text']),false);eq(isset($d['confidential_notes']),false);eq(array_keys($d),array_keys(\Morshed\Product\ExperienceCases::NARRATIVE));eq(isset($d['summary']),false);eq(isset($d['outcome']),false);});
+check('public experience body contains only narrative while internal metadata remains searchable',function()use($c,$eid){$v=$c->experience($eid);eq(str_contains($v['body'],'خلاصه کوتاه'),false);eq(str_contains($v['body'],'مدیران اردو'),false);eq(str_contains($v['body'],'مسئله واقعی'),true);});
 check('public filters use actual structured target audience and outcome',function()use($c,$eid){eq($c->experiences(['q'=>'ساختاریافته','target_audience'=>'اردو','outcome'=>'failure'])[0]['id'],$eid);eq($c->experiences(['q'=>'ساختاریافته','outcome'=>'success']),[]);});
 $next=$cases->save($aa,array_replace($input,['title'=>'ویرایش جدید منتظر تأیید']));
 check('editing approved case preserves public revision and resets owner approval',function()use($c,$cases,$id,$eid,$next){eq($c->experience($eid)['version_id'],$id);eq($cases->details($next['id'])['owner_approved_at'],null);eq($next['id']===$id,false);});

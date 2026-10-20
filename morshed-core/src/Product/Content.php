@@ -64,9 +64,15 @@ final class Content
         return [" FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id LEFT JOIN m_terms t ON t.id=v.term_id WHERE $where",$args];}
     public function experienceTotal(array $d=[]):int{[$sql,$args]=$this->experienceFilter($d);return (int)$this->db->run('SELECT COUNT(*)'.$sql,$args)->fetchColumn();}
     public function experiences(array $d=[]):array
-    {[$sql,$args]=$this->experienceFilter($d);$sort=Policy::choice($d['sort']??'relevant',['relevant','latest']);$order='v.reviewed_at DESC,e.id';if($sort==='relevant'&&is_string($d['q']??null)&&trim($d['q'])!==''){$order="(REPLACE(REPLACE(v.title,'ي','ی'),'ك','ک') LIKE ?) DESC,".$order;$args[]=Policy::query($d['q']);}$page=Policy::integer($d['page']??1,1,10000);$extra=\Morshed\Core\Upgrade::ready($this->db)?', (SELECT summary FROM m_experience_details WHERE version_id=v.id) AS summary, (SELECT outcome FROM m_experience_details WHERE version_id=v.id) AS outcome':'';return $this->db->all('SELECT e.id,e.mentor_id,v.id AS version_id,v.title,v.body,v.version_no,t.title AS term_title,u.display_name'.$extra.$sql.' ORDER BY '.$order.' LIMIT 21 OFFSET '.(($page-1)*20),$args);}
+    {[$sql,$args]=$this->experienceFilter($d);$sort=Policy::choice($d['sort']??'relevant',['relevant','latest']);$order='v.reviewed_at DESC,e.id';if($sort==='relevant'&&is_string($d['q']??null)&&trim($d['q'])!==''){$order="(REPLACE(REPLACE(v.title,'ي','ی'),'ك','ک') LIKE ?) DESC,".$order;$args[]=Policy::query($d['q']);}$page=Policy::integer($d['page']??1,1,10000);$extra=\Morshed\Core\Upgrade::ready($this->db)?', (SELECT summary FROM m_experience_details WHERE version_id=v.id) AS summary, (SELECT outcome FROM m_experience_details WHERE version_id=v.id) AS outcome':'';return array_map(fn($v)=>$this->publicNarrative($v),$this->db->all('SELECT e.id,e.mentor_id,v.id AS version_id,v.title,v.body,v.version_no,t.title AS term_title,u.display_name'.$extra.$sql.' ORDER BY '.$order.' LIMIT 21 OFFSET '.(($page-1)*20),$args));}
     public function experience(string $id):array
-    {$v=$this->db->one("SELECT e.id,e.mentor_id,v.id AS version_id,v.title,v.body,v.version_no,v.term_id,u.display_name FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id WHERE e.id=? AND m.status='active' AND u.status='active'",[$id]);if(!$v){throw new Problem('NOT_FOUND','تجربه منتشرشده پیدا نشد.',404);}return $v;}
+    {$v=$this->db->one("SELECT e.id,e.mentor_id,v.id AS version_id,v.title,v.body,v.version_no,v.term_id,u.display_name FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id WHERE e.id=? AND m.status='active' AND u.status='active'",[$id]);if(!$v){throw new Problem('NOT_FOUND','تجربه منتشرشده پیدا نشد.',404);}return $this->publicNarrative($v);}
+    private function publicNarrative(array $record):array
+    {
+        $case=(new ExperienceCases($this->db,$this->audit))->details($record['version_id'],true);
+        if($case){$parts=[];foreach(ExperienceCases::NARRATIVE as $key=>$label){if(trim($case[$key]??'')!==''){$parts[]=$label."\n".$case[$key];}}$record['body']=implode("\n\n",$parts);if(array_key_exists('summary',$record)){$record['summary']=$case['problem']??'';}}
+        unset($record['outcome']);return $record;
+    }
     public function saveStore(array $a,array $blocks):string
     {return $this->write($a,false,function()use($a,$blocks){if(count($blocks)>20){throw new Problem('INVALID_INPUT','حداکثر بیست بلوک مجاز است.');}$clean=[];$heroCount=0;foreach($blocks as $b){if(!is_array($b)){throw new Problem('INVALID_INPUT','بلوک معتبر نیست.');}$type=Policy::choice($b['type']??'', ['mentors','experiences','topics','text','hero']);$ids=$b['ids']??[];if(!is_array($ids)||count($ids)>20){throw new Problem('INVALID_INPUT','فهرست بلوک معتبر نیست.');}foreach($ids as $id){if(!is_string($id)||!Security::validId($id)){throw new Problem('INVALID_INPUT','شناسه بلوک معتبر نیست.');}}
             if($type==='hero'&&++$heroCount>1){throw new Problem('INVALID_INPUT','فقط یک سربرگ اصلی برای ویترین مجاز است.');}
@@ -93,7 +99,7 @@ final class Content
     }
     public function storeDefaults():array
     {
-        $out=[];foreach(['topics'=>'از کجا شروع کنیم؟','mentors'=>'صاحب‌تجربه‌ها','experiences'=>'تجربه‌های خواندنی'] as $type=>$title){$out[]=['type'=>$type,'title'=>$title,'text'=>'','ids'=>[],'term'=>'','mode'=>'auto','layout'=>'rail','starts_at'=>0,'ends_at'=>4102444800];}return $out;
+        $out=[];foreach(['topics'=>'از کجا شروع کنیم؟','mentors'=>'مرشدها','experiences'=>'تجربه‌های خواندنی'] as $type=>$title){$out[]=['type'=>$type,'title'=>$title,'text'=>'','ids'=>[],'term'=>'','mode'=>'auto','layout'=>'rail','starts_at'=>0,'ends_at'=>4102444800];}return $out;
     }
     public function storeDraft(?string $id=null,?string $actor=null):string
     {

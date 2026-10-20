@@ -1,6 +1,6 @@
-<?php $footerSettings=$footerSettings??[];$footerText=trim($footerSettings['footer_text']??'')?:'مرشد، جایی برای پیدا کردن صاحب تجربه و گفت‌وگوی مستقیم دربارهٔ مسیر پیش روی توست.'; ?>
+<?php $footerSettings=$footerSettings??[];$footerText=trim($footerSettings['footer_text']??'')?:'مرشد، جایی برای پیدا کردن مرشد و گفت‌وگوی مستقیم دربارهٔ مسیر پیش روی توست.'; ?>
 <footer class="home-footer" aria-label="درباره مرشد و اطلاعات تماس">
-<div class="footer-about"><h2>یک تجربه، آغاز یک گفت‌وگو</h2><p><?= $this->h($footerText) ?></p><a class="textlink" href="<?= $this->h($this->url('/about')) ?>">بیشتر دربارهٔ مرشد</a></div>
+<div class="footer-about"><h2>یک تجربه، آغاز یک گفت‌وگو</h2><p><?= $this->copy($footerText) ?></p><a class="textlink" href="<?= $this->h($this->url('/about')) ?>">بیشتر دربارهٔ مرشد</a></div>
 <div class="footer-contact"><h2>ارتباط با مرشد</h2><address>
 <?php if(!empty($footerSettings['support_phone'])): ?><div><span>شماره تماس</span><bdi><?= $this->h($footerSettings['support_phone']) ?></bdi></div><?php endif; ?>
 <?php if(!empty($footerSettings['footer_email'])): ?><div><span>ایمیل</span><a href="mailto:<?= $this->h($footerSettings['footer_email']) ?>"><bdi><?= $this->h($footerSettings['footer_email']) ?></bdi></a></div><?php endif; ?>

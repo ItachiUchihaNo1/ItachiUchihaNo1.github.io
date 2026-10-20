@@ -99,7 +99,7 @@ try:
         start(phpcmd+['-S',f'127.0.0.1:{p}','-t',str(app/root),str(app/root/'index.php')],realm);wait_port(p)
     site=Client(cfg['origins']['site']);adminclient=Client(cfg['origins']['admin']);content=Client(cfg['origins']['admin'])
     guest=Client(cfg['origins']['site'])
-    status,home,headers=guest.request('/');assert status==200 and 'Location' not in headers and 'صاحب‌تجربه‌های اربعین' in home and 'card-rail' in home
+    status,home,headers=guest.request('/');assert status==200 and 'Location' not in headers and 'مرشدهای اربعین' in home and 'card-rail' in home
     assert '<nav class="bottom"' in home and home.count('aria-hidden="true"')>=5
     assert_status(guest,'/api/v1/me',401);ok('guest opens real public storefront with five navigation icons and no forced authentication')
     for suffix in ['', '?mode=register', '?method=otp']:
@@ -389,3 +389,4 @@ finally:
         except subprocess.TimeoutExpired:process.kill();process.wait()
     for out in logs:out.close()
     print('Private test scratch: '+str(scratch))
+

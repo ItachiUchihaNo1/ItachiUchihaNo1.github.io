@@ -103,4 +103,8 @@ $f=$ext->begin('eitaa','login',null,$browser,'pending-test');$conflicting=$ext->
 check('different Eitaa identity never overwrites an occupied phone account',fn()=>rejects('IDENTITY_CONFLICT',fn()=>$ext->pendingSms($conflicting,$phoneExisting)));
 check('pending retry after successful phone binding stays on the same user',fn()=>eq($ext->pendingSms($smsPending,$smsTarget),$smsTarget));
 
+function flatContactData(string $subject,string $phone):string{global $settings;$fields=['auth_date'=>(string)time(),'user_id'=>$subject,'phone_number'=>$phone];ksort($fields);$pairs=[];foreach($fields as $key=>$value){$pairs[]=$key.'='.$value;}$secret=hash_hmac('sha256',$settings['eitaa']['app_token'],'WebAppData',true);$fields['hash']=hash_hmac('sha256',implode("\n",$pairs),$secret);return http_build_query($fields,'','&',PHP_QUERY_RFC3986);}
+$db->run('DELETE FROM m_rate_limits');$f=$ext->begin('eitaa','login',null,$browser,'flat-contact-test');$flatPending=$ext->eitaa($f['state'],initData('877665544',time()),$browser,null,'flat-contact-test')['pending_eitaa'];$flatOwner=phoneOwner('09124445551');
+check('signed flat contact fields link to the exact pre-existing SMS account',fn()=>eq($ext->pendingContact($flatPending,flatContactData('877665544','989124445551'),'flat-contact-test'),$flatOwner));
+check('tampering with flat contact phone fails signature validation',fn()=>rejects('INVALID_ASSERTION',fn()=>$ext->pendingContact($flatPending,str_replace('989124445551','989124445552',flatContactData('877665544','989124445551')),'flat-contact-test')));
 echo "EXTERNAL RESULT: $passed passed, $failed failed\n";exit($failed?1:0);

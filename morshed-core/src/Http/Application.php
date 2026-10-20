@@ -73,7 +73,7 @@ final class Application
     private function eitaaResult(array $result):void
     {
         if(isset($result['pending_eitaa'])){$_SESSION['pending_eitaa']=$result['pending_eitaa'];unset($_SESSION['otp_flow']);session_regenerate_id(true);$this->success('/account/identify');return;}
-        unset($_SESSION['pending_eitaa']);if($result['purpose']==='login'){$this->issue($result['user_id'],'eitaa');}$this->success($this->afterLogin());
+        unset($_SESSION['pending_eitaa']);if($result['purpose']==='login'){$this->issue($result['user_id'],'eitaa');}$this->success($this->afterLogin(),['ok'=>true,'csrf'=>$_SESSION['csrf']]);
     }
     private function needsEitaaPhone(string $uid):bool
     {return empty($this->db->one('SELECT phone FROM m_users WHERE id=?',[$uid])['phone'])&&(bool)$this->db->one("SELECT id FROM m_auth_identities WHERE user_id=? AND provider='eitaa'",[$uid]);}
@@ -208,7 +208,7 @@ final class Application
         if($this->api&&$this->path==='/csrf'){$this->json(['csrf'=>$_SESSION['csrf']]);return;}
         if($this->path==='/login'){$this->view->page($this->realm==='admin'?'ورود مدیریت':'ورود به مرشد',$this->realm==='admin'?'admin-login':'login',['setupAvailable'=>$this->realm==='admin'&&($this->config['setup']['enabled']??false)&&!$this->db->one('SELECT bootstrapped_at FROM m_installation WHERE id=1')['bootstrapped_at']],$error);return;}
         if($this->realm==='admin'){$this->getAdmin($error);return;}
-        if($this->path==='/'){$this->view->page('مرشد؛ گفت‌وگو با صاحب تجربه','home',[],$error);return;}
+        if($this->path==='/'){$this->view->page('مرشد؛ گفت‌وگو با مرشد','home',[],$error);return;}
         if($this->path==='/auth/google/callback'){$r=$this->external->google($this->queryString('state',64),$this->queryString('code',4096),$_SESSION['external_browser']??'',$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'google');}$this->success($this->afterLogin());return;}
         if($this->path==='/auth/otp/code'){$f=$_SESSION['otp_flow']??[];if(!isset($f['id'],$f['purpose'])){throw new Problem('INVALID_CODE','ابتدا درخواست کد کنید.',400);}$this->codeForm($f['id'],$f['purpose'],$error);return;}
         if($this->path==='/auth/eitaa/start'){header('Location: https://eitaa.com/morshed_app',true,303);return;}

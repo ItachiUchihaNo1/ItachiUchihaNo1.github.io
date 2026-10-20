@@ -7,6 +7,8 @@ final class View
     private int $fieldSerial=0;
     public function __construct(public array $config,public string $realm,public string $csrf,public ?array $actor=null) {}
     public function h(mixed $v):string{return htmlspecialchars((string)($v??''),ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8');}
+    public function copy(mixed $text):string
+    {return $this->h(str_replace(['صاحب‌تجربه‌های','صاحب تجربه‌های','صاحب‌تجربه‌ها','صاحب تجربه‌ها','صاحبان تجربه','صاحب تجربه','صاحب‌تجربه'],['مرشدهای','مرشدهای','مرشدها','مرشدها','مرشدها','مرشد','مرشد'],(string)$text));}
     public function paragraphs(string $text):string
     {
         $out='';foreach(preg_split('/\R[ \t]*\R(?:[ \t]*\R)*/u',trim($text))?:[] as $part){if(trim($part)!==''){$out.='<p>'.nl2br($this->h(trim($part))).'</p>';}}return $out;

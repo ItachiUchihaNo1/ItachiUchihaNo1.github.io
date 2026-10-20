@@ -108,7 +108,7 @@ final class Administration
         if(!$u||!empty(\Morshed\Identity\Profile::get($this->db,$target)['deleted_at'])){throw new Problem('NOT_FOUND','حساب فعال پیدا نشد.',404);}
         if($role==='user'){$this->db->run("UPDATE m_mentors SET status='restricted',updated_at=? WHERE user_id=?",[time(),$target]);return;}
         $old=$this->db->one('SELECT headline,bio FROM m_mentors WHERE user_id=?',[$target]);
-        $headline=\Morshed\Product\Policy::text(($d['headline']??'')?:($old['headline']??($u['display_name']?:'صاحب تجربه')),600,1);
+        $headline=\Morshed\Product\Policy::text(($d['headline']??'')?:($old['headline']??($u['display_name']?:'مرشد')),600,1);
         if(preg_match_all('/./us',$headline)>180){throw new Problem('INVALID_INPUT','عنوان فعالیت حداکثر ۱۸۰ نویسه دارد.');}
         $bio=\Morshed\Product\Policy::text($d['bio']??($old['bio']??''),20000,0);
         // Role assignment is an administrator decision, never a fabricated user acceptance.

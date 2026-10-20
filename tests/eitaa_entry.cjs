@@ -1,13 +1,13 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const script=fs.readFileSync(require('node:path').join(__dirname,'../morshedapp.ir/assets/eitaa.js'),'utf8');
-function fixture(responder,initData=''){
+function fixture(responder,initData='',sdk={}){
  let submit,assigned=[],requests=[],links=[],children=[];const button={disabled:true,removeAttribute(){}},status={classList:{remove(){}},replaceChildren(){children=[]},append(x){children.push(x)},textContent:''},field={value:''};
- const context={dataset:{csrf:'csrf',url:'/context',loginUrl:'/login-api'}};
+ const context={dataset:{csrf:'csrf',url:'/context',loginUrl:'/login-api',contactUrl:'/contact-api'}};
  const form={elements:{purpose:{value:'login'}},querySelector(s){return s==='[data-eitaa-input]'?field:s==='[data-eitaa-status]'?status:null;},querySelectorAll(){return [button]},addEventListener(n,f){if(n==='submit')submit=f;}};
  const document={getElementById(id){return id==='eitaa-context'?context:null},querySelectorAll(s){return s==='form'?[form]:s==='[data-eitaa-input]'?[field]:[]},createElement(){return {addEventListener(n,f){this.click=f}}}};
  const location={origin:'https://morshedapp.ir',href:'https://morshedapp.ir/index.php?r=%2Flogin',assign(x){assigned.push(x)}};
- const fetch=async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});return responder(url,options)};
- const window={fetch,Eitaa:{WebApp:{initData,ready(){},openEitaaLink(url){links.push(url)}}}};
+ const fetch=async(url,options)=>{requests.push({url,body:JSON.parse(options.body),csrf:options.headers['X-CSRF-Token']});return responder(url,options)};
+ const window={fetch,Eitaa:{WebApp:{initData,ready(){},openEitaaLink(url){links.push(url)},...sdk}}};
  vm.runInNewContext(script,{window,document,location,fetch,AbortController,setTimeout,clearTimeout,URL,console});
  return {button,status,requests,assigned,links,children:()=>children,submit:()=>submit({preventDefault(){}})};
 }
@@ -18,5 +18,6 @@ function fixture(responder,initData=''){
  f=fixture(async()=>({ok:true,json:async()=>({launch_url:'https://eitaa.com/morshed_app'})}));await f.submit();assert.equal(f.links.length,1);assert.equal(f.button.disabled,false);console.log('PASS outside app launches official Eitaa destination without fabricating login');
  f=fixture(async()=>({ok:true,json:async()=>({redirect:'https://invalid.example'})}));await f.submit();assert.equal(f.assigned.length,0);assert.equal(f.button.disabled,false);console.log('PASS external response cannot redirect authentication to a foreign origin');
  f=fixture(async()=>({ok:true,json:async()=>({ok:true})}),'signed-data-fixture');await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(f.requests.map(x=>x.url),['/context']);assert.equal(f.assigned.length,0);console.log('PASS public launch only captures context and never automatically signs in or requests contact');
- console.log('EITAA BROWSER RESULT: 6 passed, 0 failed');
+ f=fixture(async(url)=>({ok:true,json:async()=>url==='/contact-api'?{redirect:'/index.php?r=%2Faccount'}:{redirect:'/index.php?r=%2Faccount%2Fidentify',csrf:'rotated-csrf'}}),'',{requestContact(callback){callback(true,{response:'signed-contact-fixture'});}});await f.submit();assert.equal(f.requests[1].url,'/contact-api');assert.equal(f.requests[1].body.contact_data,'signed-contact-fixture');assert.equal(f.requests[1].csrf,'rotated-csrf');assert.match(f.assigned[0],/account$/);console.log('PASS one Eitaa action requests signed contact after explicit click and uses refreshed CSRF before entering the same account');
+ console.log('EITAA BROWSER RESULT: 7 passed, 0 failed');
 })().catch(e=>{console.error(e);process.exit(1)});

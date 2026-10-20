@@ -42,8 +42,7 @@ final class ExternalAccounts
     public function contact(array $actor,string $data,string $ip):string
     {
         $c=$this->enabled('eitaa');$this->recent($actor);$this->rate->hit('eitaa-contact:'.$actor['user_id'],6,900);
-        try{$proof=(new EitaaInitDataVerifier($c['app_token'],60))->verifyFields($data,time());$contact=json_decode($proof['fields']['contact']??'',true,8,JSON_THROW_ON_ERROR|JSON_BIGINT_AS_STRING);if(!is_array($contact)||!isset($contact['user_id'],$contact['phone_number'])||!is_string($contact['phone_number'])){throw new \DomainException('Unsupported signed contact');}$subject=(string)$contact['user_id'];if(!preg_match('/^[1-9][0-9]{0,19}$/D',$subject)){throw new \DomainException('Invalid subject');}$rawPhone=$contact['phone_number'];if(preg_match('/^98[0-9]{10}$/D',$rawPhone)){$rawPhone='+'.$rawPhone;}$phone=\Morshed\Core\Security::phone($rawPhone);}
-        catch(\Throwable $e){throw new Problem('INVALID_ASSERTION','دادهٔ امضاشدهٔ شماره ایتا تأیید نشد؛ می‌توانید از کد پیامکی استفاده کنید.',401);}
+        $proof=$this->contactProof($data,$c['app_token']);$subject=$proof['subject'];$phone=$proof['phone'];
         $identity=$this->db->one("SELECT user_id FROM m_auth_identities WHERE provider='eitaa' AND subject=?",[$subject]);if(!$identity||$identity['user_id']!==$actor['user_id']){throw new Problem('IDENTITY_MISMATCH','شمارهٔ ایتا باید متعلق به حساب متصل همین کاربر باشد.',403);}
         $reply=$this->http->request('https://eitaayar.ir/api/app/verify',['token'=>$c['app_token'],'hash'=>$proof['replay_key'],'ip'=>$ip]);if(($reply['ok']??false)!==true){throw new Problem('INVALID_ASSERTION','اعتبار رسمی شمارهٔ ایتا تأیید نشد.',401);}
         return $this->db->tx(function()use($actor,$phone,$proof,$subject){
@@ -96,14 +95,25 @@ final class ExternalAccounts
             $this->audit->notify($target,'ورود ایتا به حساب شما متصل شد','پس از تأیید مالکیت شماره، ورود با ایتا به همین حساب متصل شد.');return $target;
     }
 
+    private function contactProof(string $data,string $token):array
+    {
+        try{$proof=(new EitaaInitDataVerifier($token,60))->verifyFields($data,time());}
+        catch(\DomainException $e){throw new Problem('INVALID_ASSERTION','اعتبار امضای شمارهٔ ایتا تأیید نشد؛ دوباره شماره را ارسال کنید یا از کد پیامکی استفاده کنید. (C1)',401);}
+        try{
+            $fields=$proof['fields'];$contact=$fields;
+            if(isset($fields['contact'])){$contact=json_decode($fields['contact'],true,8,JSON_THROW_ON_ERROR|JSON_BIGINT_AS_STRING);}
+            if(!is_array($contact)){throw new \DomainException('Contact format');}
+            $subject=$contact['user_id']??null;$phone=$contact['phone_number']??null;
+            if((!is_int($subject)&&!is_string($subject))||!preg_match('/^[1-9][0-9]{0,19}$/D',(string)$subject)||(!is_string($phone)&&!is_int($phone))){throw new \DomainException('Contact fields');}
+            $raw=trim((string)$phone);if(preg_match('/^98[0-9]{10}$/D',$raw)){$raw='+'.$raw;}
+            return $proof+['subject'=>(string)$subject,'phone'=>Security::phone($raw)];
+        }catch(\Throwable $e){throw new Problem('INVALID_ASSERTION','قالب شمارهٔ امضاشدهٔ ایتا قابل خواندن نیست؛ می‌توانید از کد پیامکی استفاده کنید. (C2)',401);}
+    }
     /** Pending data is kept only in the server's CSRF session after verified Eitaa login. */
     public function pendingContact(array $pending,string $data,string $ip):string
     {
         $this->pendingSubject($pending);$c=$this->enabled('eitaa');$this->rate->hit('eitaa-pending-contact:'.$ip,6,900);
-        try{$proof=(new EitaaInitDataVerifier($c['app_token'],60))->verifyFields($data,time());$contact=json_decode($proof['fields']['contact']??'',true,8,JSON_THROW_ON_ERROR|JSON_BIGINT_AS_STRING);
-            if(!is_array($contact)||!is_string($contact['phone_number']??null)||(string)($contact['user_id']??'')!==$pending['subject']){throw new \DomainException('Contact subject mismatch');}
-            $raw=$contact['phone_number'];if(preg_match('/^98[0-9]{10}$/D',$raw)){$raw='+'.$raw;}$phone=Security::phone($raw);
-        }catch(\Throwable $e){throw new Problem('INVALID_ASSERTION','شمارهٔ امضاشده با حساب ایتای در حال ورود مطابقت ندارد؛ از تأیید پیامکی استفاده کنید.',401);}
+        $proof=$this->contactProof($data,$c['app_token']);if($proof['subject']!==$pending['subject']){throw new Problem('INVALID_ASSERTION','شمارهٔ ارسالی متعلق به حساب ایتای در حال ورود نیست. (C3)',401);}$phone=$proof['phone'];
         $reply=$this->http->request('https://eitaayar.ir/api/app/verify',['token'=>$c['app_token'],'hash'=>$proof['replay_key'],'ip'=>$ip]);if(($reply['ok']??false)!==true){throw new Problem('INVALID_ASSERTION','اعتبار رسمی شمارهٔ ایتا تأیید نشد.',401);}
         return $this->db->tx(function()use($pending,$phone,$proof){
             $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$key=hash('sha256','eitaa-contact:'.$proof['replay_key']);
