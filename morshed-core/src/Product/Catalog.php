@@ -10,7 +10,7 @@ final class Catalog
     public function __construct(private Database $db){}
     private function storage():void
     {
-        if($this->ready){return;}
+        if($this->ready||$this->db->featureReady('catalog13')){return;}
         try{$this->db->run('SELECT mentor_id FROM m_saved_mentors LIMIT 0');$this->db->run('SELECT experience_id FROM m_experience_metrics LIMIT 0');$this->db->run('SELECT experience_id FROM m_saved_experiences LIMIT 0');}
         catch(\PDOException $e){
             if((int)($e->errorInfo[1]??0)!==1146){throw $e;}
@@ -19,7 +19,7 @@ final class Catalog
             $this->db->run('CREATE TABLE IF NOT EXISTS m_experience_metrics (experience_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,views BIGINT UNSIGNED NOT NULL DEFAULT 0,FOREIGN KEY(experience_id) REFERENCES m_experiences(id)) ENGINE=InnoDB');
             $this->db->run('CREATE TABLE IF NOT EXISTS m_saved_experiences (user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,experience_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,created_at BIGINT UNSIGNED NOT NULL,PRIMARY KEY(user_id,experience_id),FOREIGN KEY(user_id) REFERENCES m_users(id),FOREIGN KEY(experience_id) REFERENCES m_experiences(id)) ENGINE=InnoDB');
         }
-        $this->ready=true;
+        $this->ready=true;$this->db->markFeatureReady('catalog13');
     }
     public function savedIds(string $uid):array
     {$this->storage();return array_column($this->db->all('SELECT mentor_id FROM m_saved_mentors WHERE user_id=? ORDER BY created_at DESC,mentor_id',[$uid]),'mentor_id');}
@@ -43,9 +43,9 @@ final class Catalog
     {
         if(!$rows){return [];}$ids=array_values(array_unique(array_column($rows,'user_id')));$marks=implode(',',array_fill(0,count($ids),'?'));
         $cities=\Morshed\Core\Upgrade::ready($this->db)?array_column($this->db->all("SELECT user_id,city FROM m_user_profiles WHERE user_id IN ($marks)",$ids),'city','user_id'):[];
-        $counts=array_column($this->db->all("SELECT e.mentor_id,COUNT(*) AS total FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id WHERE e.mentor_id IN ($marks) GROUP BY e.mentor_id",$ids),'total','mentor_id');
+        $counts=[];
         $talks=array_column($this->db->all("SELECT mentor_id,COUNT(*) AS total FROM m_bookings WHERE mentor_id IN ($marks) AND state='completed' GROUP BY mentor_id",$ids),'total','mentor_id');
-        $versions=$this->db->all("SELECT e.mentor_id,v.id FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id WHERE e.mentor_id IN ($marks)",$ids);$labels=(new Taxonomy($this->db))->labels(array_column($versions,'id'));$tags=[];foreach($versions as $version){foreach($labels[$version['id']]['issues']??[] as $tag){$tags[$version['mentor_id']][$tag['id']]=$tag;}}
+        $versions=$this->db->all("SELECT e.mentor_id,v.id FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id WHERE e.mentor_id IN ($marks)",$ids);$labels=(new Taxonomy($this->db))->labels(array_column($versions,'id'));$tags=[];foreach($versions as $version){$counts[$version['mentor_id']]=($counts[$version['mentor_id']]??0)+1;foreach($labels[$version['id']]['issues']??[] as $tag){$tags[$version['mentor_id']][$tag['id']]=$tag;}}
         foreach($rows as &$row){
             $id=$row['user_id'];$row['city']=$cities[$id]??'';$row['experience_count']=(int)($counts[$id]??0);$row['conversation_count']=(int)($talks[$id]??0);$row['issue_tags']=array_values($tags[$id]??[]);
         }unset($row);return $rows;
@@ -54,7 +54,7 @@ final class Catalog
     {
         if(!$rows){return [];}$this->storage();$ids=array_values(array_unique(array_column($rows,'id')));$marks=implode(',',array_fill(0,count($ids),'?'));
         $views=array_column($this->db->all("SELECT experience_id,views FROM m_experience_metrics WHERE experience_id IN ($marks)",$ids),'views','experience_id');
-        $facts=[];foreach($this->db->all("SELECT e.id,m.avatar_asset_id,t.id AS term_id,t.title,t.kind,p.title AS parent_title FROM m_experiences e JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id LEFT JOIN m_terms t ON t.id=v.term_id AND t.active=1 LEFT JOIN m_terms p ON p.id=t.parent_id WHERE e.id IN ($marks)",$ids) as $fact){$facts[$fact['id']]=$fact;}
+        $facts=[];foreach($this->db->all("SELECT e.id,m.avatar_asset_id FROM m_experiences e JOIN m_mentors m ON m.user_id=e.mentor_id WHERE e.id IN ($marks)",$ids) as $fact){$facts[$fact['id']]=$fact;}
         $labels=(new Taxonomy($this->db))->labels(array_column($rows,'version_id'));
         foreach($rows as &$row){
             $fact=$facts[$row['id']]??[];$row['views']=(int)($views[$row['id']]??0);$row['mentor_avatar_asset_id']=$fact['avatar_asset_id']??null;

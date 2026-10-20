@@ -1,6 +1,6 @@
 <?php $register=($_GET['mode']??'')==='register';$otp=$register||($_GET['method']??'')==='otp'; ?>
 <section class="auth-card" aria-labelledby="auth-title">
-<a class="auth-brand" href="<?= $this->h($this->url('/')) ?>"><img src="/assets/morshed-logo.png" width="96" height="96" alt="مرشد"><span>مرشد</span></a>
+<a class="auth-brand" href="<?= $this->h($this->url('/')) ?>"><img src="/assets/morshed-logo-fast.webp" width="96" height="96" alt="مرشد"><span>مرشد</span></a>
 <h1 id="auth-title"><?= $register?'ساخت حساب مرشد':'خوش آمدی' ?></h1><p class="muted auth-intro">برای گفت‌وگو با مرشد، وارد حسابت شو.</p>
 <nav class="auth-tabs" aria-label="ورود یا ثبت نام"><a <?= !$register?'aria-current="page"':'' ?> href="<?= $this->h($this->url('/login')) ?>">ورود</a><a <?= $register?'aria-current="page"':'' ?> href="<?= $this->h($this->url('/login?mode=register')) ?>">ثبت نام</a></nav>
 <?php if($otp): ?><?= $this->start('/auth/otp/request') ?><input type="hidden" name="purpose" value="login"><?= $this->field('phone','شماره همراه','tel') ?><button class="primary full"><?= $register?'دریافت کد و ساخت حساب':'دریافت کد ورود' ?></button></form><p class="muted small">ثبت نام پس از تأیید شماره همراه با کد پیامکی انجام می‌شود.</p><?php if(!$register): ?><a class="textlink" href="<?= $this->h($this->url('/login')) ?>">ورود با رمز عبور</a><?php endif; ?>

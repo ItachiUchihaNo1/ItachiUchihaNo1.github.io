@@ -6,7 +6,7 @@ import ftplib, hashlib, io, json, os, re, ssl, sys, time, urllib.request
 
 ROOT=Path(__file__).resolve().parent.parent
 ALLOWED_ROOTS={'morshed-core','morshedapp.ir','admin.morshedapp.ir'}
-ALLOWED_EXT={'.php','.css','.js','.png','.woff2','.txt'}
+ALLOWED_EXT={'.php','.css','.js','.png','.webp','.woff2','.txt'}
 
 def allowed(name):
     if name=='morshed-core/database/migrations/007_profiles_and_experience_cases.sql':return True

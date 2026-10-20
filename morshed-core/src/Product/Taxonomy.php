@@ -11,13 +11,13 @@ final class Taxonomy
     public function __construct(private Database $db){}
     public function storage():void
     {
-        if($this->ready){return;}
+        if($this->ready||$this->db->featureReady('taxonomy13')){return;}
         try{$this->db->run('SELECT term_id FROM m_term_icons LIMIT 0');$this->db->run('SELECT version_id FROM m_experience_issues LIMIT 0');}
         catch(\PDOException $e){
             if((int)($e->errorInfo[1]??0)!==1146){throw $e;}
             $this->db->run("CREATE TABLE IF NOT EXISTS m_term_icons (term_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,icon VARCHAR(24) CHARACTER SET ascii NOT NULL,FOREIGN KEY(term_id) REFERENCES m_terms(id)) ENGINE=InnoDB");
             $this->db->run('CREATE TABLE IF NOT EXISTS m_experience_issues (version_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,term_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,PRIMARY KEY(version_id,term_id),INDEX(term_id,version_id),FOREIGN KEY(version_id) REFERENCES m_experience_versions(id),FOREIGN KEY(term_id) REFERENCES m_terms(id)) ENGINE=InnoDB');
-        }$this->ready=true;
+        }$this->ready=true;$this->db->markFeatureReady('taxonomy13');
     }
     public function decorate(array $rows):array
     {$this->storage();$icons=array_column($this->db->all('SELECT term_id,icon FROM m_term_icons'),'icon','term_id');foreach($rows as &$row){$row['icon']=$icons[$row['id']]??'book';}unset($row);return $rows;}

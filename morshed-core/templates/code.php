@@ -1,6 +1,6 @@
 <?php $route=match($purpose){'reset'=>'/auth/password/reset','change_phone'=>'/me/phone/verify',default=>'/auth/otp/verify'};$otp=$otp??['expires_in'=>120,'resend_in'=>60,'masked_phone'=>'','can_resend'=>false]; ?>
 <section class="otp-card" data-otp-panel aria-labelledby="otp-heading">
-<a class="auth-brand" href="<?= $this->h($this->url('/')) ?>"><img src="/assets/morshed-logo.png" width="80" height="80" alt="مرشد"><span>مرشد</span></a>
+<a class="auth-brand" href="<?= $this->h($this->url('/')) ?>"><img src="/assets/morshed-logo-fast.webp" width="80" height="80" alt="مرشد"><span>مرشد</span></a>
 <span class="otp-eyebrow">یک قدم تا گفت‌وگو با مرشد</span><h1 id="otp-heading">شماره‌ات را تأیید کن</h1>
 <p class="otp-subtitle" id="otp-description">کد ۴ رقمی پیامک را وارد کن<?php if($otp['masked_phone']): ?>؛ شمارهٔ درخواست: <bdi><?= $this->h($otp['masked_phone']) ?></bdi><?php endif; ?>.</p>
 <?= str_replace('<form ', '<form data-otp-verify data-api-url="'.$this->h($this->url('/api/v1'.$route)).'" ', $this->start($route)) ?><input type="hidden" name="challenge_id" value="<?= $this->h($challenge) ?>">

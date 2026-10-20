@@ -3,7 +3,7 @@ declare(strict_types=1);
 namespace Morshed\Core;
 final class Upgrade
 {
-    public static function ready(Database $db):bool{return (int)$db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()>=7;}
+    public static function ready(Database $db):bool{if($db->featureReady('schema7')){return true;}$ready=(int)$db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()>=7;if($ready){$db->markFeatureReady('schema7');}return $ready;}
     public static function apply(Database $db):void
     {
         if((int)$db->run("SELECT GET_LOCK('morshed_schema_7',10)")->fetchColumn()!==1){throw new Problem('UPGRADE_BUSY','به‌روزرسانی دیگری در حال اجراست.',409);}

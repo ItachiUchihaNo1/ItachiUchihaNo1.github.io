@@ -19,7 +19,7 @@ final class PrivateFiles
     public function upload(array $a,string $booking,array $file):string
     {
         if(($file['error']??UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_OK||!is_string($file['tmp_name']??null)||!is_uploaded_file($file['tmp_name'])||!is_string($file['name']??null)){throw new Problem('INVALID_FILE','بارگذاری انجام نشد؛ فایل را دوباره انتخاب کنید.');}
-        $meta=self::inspect($file['tmp_name'],$file['name']);$target=null;
+        (new ConsultationData($this->db))->storage();$meta=self::inspect($file['tmp_name'],$file['name']);$target=null;
         try{return $this->db->tx(function()use($a,$booking,$file,$meta,&$target){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$s=new Consultations($this->db,$this->audit);$s->booking($a,$booking);$existing=$this->db->one('SELECT id FROM m_private_files WHERE booking_id=? AND owner_id=? AND sha256=?',[$booking,$a['user_id'],$meta['sha256']]);if($existing){return $existing['id'];}$s->writable($a,$booking);
             if((int)$this->db->run('SELECT COALESCE(SUM(byte_size),0) FROM m_private_files WHERE booking_id=?',[$booking])->fetchColumn()+$meta['size']>52428800){throw new Problem('STORAGE_LIMIT','سقف پنجاه مگابایت فایل برای هر جلسه تکمیل شده است.');}
             $key=bin2hex(random_bytes(32));$target=$this->directory().DIRECTORY_SEPARATOR.$key;if(!move_uploaded_file($file['tmp_name'],$target)){throw new Problem('STORAGE_UNAVAILABLE','ذخیره فایل انجام نشد؛ فایل را دوباره انتخاب کنید.',503);}chmod($target,0600);$id=Security::id();$this->db->run('INSERT INTO m_private_files VALUES(?,?,?,?,?,?,?,?,?)',[$id,$booking,$a['user_id'],$key,$meta['name'],$meta['mime'],$meta['size'],$meta['sha256'],time()]);$this->audit->add($a['user_id'],'site','file.stored',$id);return $id;});}
