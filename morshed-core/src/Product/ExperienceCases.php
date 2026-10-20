@@ -27,7 +27,8 @@ final class ExperienceCases
     public function save(array $a,array $input):array
     {
         if(!Upgrade::ready($this->db)){throw new Problem('UPGRADE_REQUIRED','ابتدا به‌روزرسانی دیتابیس لازم است.',503);}
-        return $this->db->tx(function()use($a,$input){
+        $taxonomy=new Taxonomy($this->db);$taxonomy->storage();
+        return $this->db->tx(function()use($a,$input,$taxonomy){
             $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$policy=new Policy($this->db);$admin=($a['realm']??'')==='admin';
             if($admin){$policy->admin($a);}else{$m=$policy->mentor($a);if(!$m['accepted_at']){throw new Problem('INVITE_NOT_ACCEPTED','دعوت باید پذیرفته شود.',409);}}
             $eid=($input['experience_id']??'')?:Security::id();$e=$this->db->one('SELECT * FROM m_experiences WHERE id=? FOR UPDATE',[$eid]);
@@ -47,6 +48,7 @@ final class ExperienceCases
             // Reviewed, submitted and public versions are immutable; edits start a new revision.
             $id=Security::id();
             {$this->db->run('INSERT INTO m_experience_versions(id,experience_id,version_no,title,body,term_id,review_note,created_at) VALUES(?,?,?,?,?,?,?,?)',[$id,$eid,($latest?(int)$latest['version_no']:0)+1,$title,$body,$term,'',time()]);}
+            $taxonomy->assign($id,$input,$latest['id']??null);
             $columns=array_keys($d);$this->db->run('INSERT INTO m_experience_details(version_id,'.implode(',',$columns).') VALUES('.implode(',',array_fill(0,count($columns)+1,'?')).') ON DUPLICATE KEY UPDATE '.implode(',',array_map(fn($k)=>$k.'=VALUES('.$k.')',$columns)),[$id,...array_values($d)]);
             $assets=$input['asset_ids']??($latest?array_column($this->db->all('SELECT asset_id FROM m_experience_assets WHERE version_id=?',[$latest['id']]),'asset_id'):[]);if(!is_array($assets)||count($assets)>5){throw new Problem('INVALID_FILE','حداکثر پنج مستند مجاز است.');}foreach($assets as $asset){if(!is_string($asset)||!$this->db->one('SELECT id FROM m_content_assets WHERE id=? AND owner_id=?',[$asset,$mentor])){throw new Problem('ACCESS_DENIED','مستند متعلق به مرشد نیست.',403);}}$this->db->run('DELETE FROM m_experience_assets WHERE version_id=?',[$id]);foreach(array_unique($assets) as $asset){$this->db->run('INSERT INTO m_experience_assets VALUES(?,?)',[$id,$asset]);}$this->audit->add($a['user_id'],$admin?'admin':'site','experience.structured_saved',$id);return ['id'=>$id,'experience_id'=>$eid];
         });

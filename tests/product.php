@@ -12,7 +12,7 @@ $aa=$db->one("SELECT id AS admin_id,user_id FROM m_admin_accounts WHERE username
 $ca=$db->one("SELECT id AS admin_id,user_id FROM m_admin_accounts WHERE username='content_test'")+['realm'=>'admin'];
 $mentor=person('مرشد آزمون');$user=person('کاربر مشاوره');$stranger=person('کاربر بی‌ارتباط');
 $topic=$c->term($ca,['kind'=>'topic','title'=>'آموزش عملی']);$issue=$c->term($ca,['kind'=>'issue','title'=>'مدیریت کلاس','parent_id'=>$topic]);
-check('issue requires an existing active topic',fn()=>rejects('INVALID_TOPIC',fn()=>$c->term($ca,['kind'=>'issue','title'=>'اشتباه'])));
+check('explicit legacy parent must be an existing active topic',fn()=>rejects('INVALID_TOPIC',fn()=>$c->term($ca,['kind'=>'issue','title'=>'اشتباه','parent_id'=>Security::id()])));
 check('site actor cannot impersonate administrator for mentor creation',fn()=>rejects('ACCESS_DENIED',fn()=>$c->invite($mentor,['user_id'=>$user['user_id'],'headline'=>'عنوان','bio'=>'متن'])));
 check('content administrator cannot activate or invite mentors',fn()=>rejects('ACCESS_DENIED',fn()=>$c->invite($ca,['user_id'=>$mentor['user_id'],'headline'=>'عنوان','bio'=>'متن'])));
 $c->invite($aa,['user_id'=>$mentor['user_id'],'headline'=>'آموزگار باتجربه','bio'=>'تجربه واقعی اداره کلاس']);

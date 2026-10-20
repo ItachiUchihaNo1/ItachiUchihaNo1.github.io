@@ -8,14 +8,20 @@ final class Content
     public function __construct(private Database $db,private Audit $audit){$this->policy=new Policy($db);}
     private function write(array $a,bool $system,callable $fn):mixed
     {return $this->db->tx(function()use($a,$system,$fn){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->policy->admin($a,$system);return $fn();});}
-    public function terms(bool $all=false):array{return $this->db->all('SELECT t.*,p.title AS parent_title FROM m_terms t LEFT JOIN m_terms p ON p.id=t.parent_id'.($all?'':' WHERE t.active=1').' ORDER BY t.kind,t.title');}
+    public function terms(bool $all=false):array{return (new Taxonomy($this->db))->decorate($this->db->all('SELECT t.*,p.title AS parent_title FROM m_terms t LEFT JOIN m_terms p ON p.id=t.parent_id'.($all?'':' WHERE t.active=1').' ORDER BY t.kind,t.title'));}
     public function term(array $a,array $d):string
-    {return $this->write($a,false,function()use($a,$d){$kind=Policy::choice($d['kind']??'', ['topic','issue']);$title=Policy::text($d['title']??'',160);$id=($d['id']??'')?:Security::id();$parent=($d['parent_id']??'')?:null;
-        if($kind==='issue'&&(!$parent||!$this->db->one("SELECT id FROM m_terms WHERE id=? AND kind='topic' AND active=1",[$parent]))){throw new Problem('INVALID_TOPIC','موضوع فعال برای مسئله انتخاب کنید.');}
-        if($kind==='topic'){$parent=null;}
-        $old=$this->db->one('SELECT * FROM m_terms WHERE id=?',[$id]);if($this->db->one('SELECT id FROM m_terms WHERE kind=? AND title=? AND id<>?',[$kind,$title,$id])){throw new Problem('CONFLICT','این عنوان طبقه‌بندی از قبل وجود دارد.',409);}if($old&&$old['kind']!==$kind){throw new Problem('CONFLICT','نوع طبقه‌بندی قابل تغییر نیست.',409);}
-        if($old){$this->db->run('UPDATE m_terms SET title=?,parent_id=?,active=? WHERE id=?',[$title,$parent,Policy::integer($d['active']??1,0,1),$id]);}else{$this->db->run('INSERT INTO m_terms(id,kind,title,parent_id) VALUES(?,?,?,?)',[$id,$kind,$title,$parent]);}
-        $this->audit->add($a['user_id'],'admin','taxonomy.saved',$id);return $id;});}
+    {
+        $taxonomy=new Taxonomy($this->db);$taxonomy->storage();
+        return $this->write($a,false,function()use($a,$d,$taxonomy){
+            $kind=Policy::choice($d['kind']??'', ['topic','issue']);$title=Policy::text($d['title']??'',160);$id=($d['id']??'')?:Security::id();
+            $old=$this->db->one('SELECT * FROM m_terms WHERE id=?',[$id]);$parent=array_key_exists('parent_id',$d)?(($d['parent_id']??'')?:null):($old['parent_id']??null);
+            if($kind==='topic'){$parent=null;}elseif($parent&&!$this->db->one("SELECT id FROM m_terms WHERE id=? AND kind='topic' AND active=1",[$parent])){throw new Problem('INVALID_TOPIC','موضوع بالادست معتبر نیست.');}
+            if($this->db->one('SELECT id FROM m_terms WHERE kind=? AND title=? AND id<>?',[$kind,$title,$id])){throw new Problem('CONFLICT','این عنوان از قبل ثبت شده است؛ همان مورد را انتخاب کنید.',409);}if($old&&$old['kind']!==$kind){throw new Problem('CONFLICT','نوع طبقه‌بندی قابل تغییر نیست.',409);}
+            if($old){$this->db->run('UPDATE m_terms SET title=?,parent_id=?,active=? WHERE id=?',[$title,$parent,Policy::integer($d['active']??1,0,1),$id]);}else{$this->db->run('INSERT INTO m_terms(id,kind,title,parent_id) VALUES(?,?,?,?)',[$id,$kind,$title,$parent]);}
+            if(isset($d['icon'])){$taxonomy->icon($id,Policy::choice($d['icon'],array_keys(Taxonomy::ICONS)));}
+            $this->audit->add($a['user_id'],'admin','taxonomy.saved',$id);return $id;
+        });
+    }
     public function invite(array $a,array $d):string
     {return $this->write($a,true,function()use($a,$d){$uid=$d['user_id']??'';if(!$this->db->one("SELECT id FROM m_users WHERE id=? AND status='active'",[$uid])){throw new Problem('NOT_FOUND','ابتدا کاربر باید حساب تأییدشده داشته باشد.',404);}
         if($this->db->one('SELECT user_id FROM m_mentors WHERE user_id=?',[$uid])){throw new Problem('CONFLICT','این کاربر قبلاً دعوت شده است.',409);}
@@ -32,9 +38,11 @@ final class Content
         $this->db->run("UPDATE m_mentors SET headline=?,bio=?,status='review',updated_at=? WHERE user_id=?",[Policy::text($d['headline']??'',180),Policy::text($d['bio']??'',20000),time(),$a['user_id']]);$this->db->run('DELETE FROM m_mentor_terms WHERE mentor_id=?',[$a['user_id']]);foreach(array_unique($terms) as $t){$this->db->run('INSERT INTO m_mentor_terms VALUES(?,?)',[$a['user_id'],$t]);}$this->audit->add($a['user_id'],'site','mentor.profile_review_requested',$a['user_id']);});}
     private function mentorFilter(array $d,bool $admin):array
     {
-        $q=Policy::query($d['q']??'');$args=[$q,$q,$q,$q,$q,$q];$where=$admin?'1=1':"m.status='active' AND u.status='active'";
-        $where.=" AND (REPLACE(REPLACE(m.headline,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(m.bio,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(u.display_name,'ي','ی'),'ك','ک') LIKE ? OR EXISTS(SELECT 1 FROM m_mentor_terms mt JOIN m_terms t ON t.id=mt.term_id WHERE mt.mentor_id=m.user_id AND t.active=1 AND REPLACE(REPLACE(t.title,'ي','ی'),'ك','ک') LIKE ?) OR EXISTS(SELECT 1 FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id WHERE e.mentor_id=m.user_id AND (REPLACE(REPLACE(v.title,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(v.body,'ي','ی'),'ك','ک') LIKE ?)))";
-        foreach(['term','topic','issue'] as $key){$term=$d[$key]??'';if(is_string($term)&&$term!==''){$where.=' AND EXISTS(SELECT 1 FROM m_mentor_terms mt JOIN m_terms t ON t.id=mt.term_id WHERE mt.mentor_id=m.user_id AND t.active=1 AND (t.id=? OR t.parent_id=?))';$args[]=$term;$args[]=$term;}}
+        (new Taxonomy($this->db))->storage();$q=Policy::query($d['q']??'');$args=[$q,$q,$q,$q,$q,$q,$q];$where=$admin?'1=1':"m.status='active' AND u.status='active'";
+        $where.=" AND (REPLACE(REPLACE(m.headline,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(m.bio,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(u.display_name,'ي','ی'),'ك','ک') LIKE ? OR EXISTS(SELECT 1 FROM m_mentor_terms mt JOIN m_terms t ON t.id=mt.term_id WHERE mt.mentor_id=m.user_id AND t.active=1 AND REPLACE(REPLACE(t.title,'ي','ی'),'ك','ک') LIKE ?) OR EXISTS(SELECT 1 FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id WHERE e.mentor_id=m.user_id AND (REPLACE(REPLACE(v.title,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(v.body,'ي','ی'),'ك','ک') LIKE ?)) OR EXISTS(SELECT 1 FROM m_experiences qe JOIN m_experience_versions qv ON qv.id=qe.public_version_id AND qv.experience_id=qe.id JOIN m_experience_issues qi ON qi.version_id=qv.id JOIN m_terms qt ON qt.id=qi.term_id WHERE qe.mentor_id=m.user_id AND qt.active=1 AND REPLACE(REPLACE(qt.title,'ي','ی'),'ك','ک') LIKE ?))";
+        foreach(['term','topic','issue'] as $key){$term=$d[$key]??'';if(is_string($term)&&$term!==''){
+            $where.=" AND EXISTS(SELECT 1 FROM m_terms ft WHERE ft.id=? AND ft.active=1".($key==='term'?'':" AND ft.kind='".$key."'")." AND (EXISTS(SELECT 1 FROM m_mentor_terms mt JOIN m_terms legacy ON legacy.id=mt.term_id WHERE mt.mentor_id=m.user_id AND legacy.active=1 AND (legacy.id=ft.id OR legacy.parent_id=ft.id)) OR EXISTS(SELECT 1 FROM m_experiences fe JOIN m_experience_versions fv ON fv.id=fe.public_version_id AND fv.experience_id=fe.id WHERE fe.mentor_id=m.user_id AND ".Taxonomy::condition('fv').")))";$args[]=$term;
+        }}
         if(isset($d['accepting'])&&$d['accepting']!==''){$paused=1-Policy::integer($d['accepting'],0,1);$where.=' AND s.acceptance_paused=?';$args[]=$paused;}
         return [" FROM m_mentors m JOIN m_users u ON u.id=m.user_id JOIN m_schedule_settings s ON s.mentor_id=m.user_id WHERE $where",$args];
     }
@@ -58,8 +66,8 @@ final class Content
     public function unpublish(array $a,string $id):void
     {$this->write($a,false,function()use($a,$id){$this->db->run('UPDATE m_experiences SET public_version_id=NULL WHERE id=?',[$id]);$this->audit->add($a['user_id'],'admin','experience.unpublished',$id);});}
     private function experienceFilter(array $d):array
-    {$q=Policy::query($d['q']??'');$args=[$q,$q,$q,$q];$where="m.status='active' AND u.status='active' AND (REPLACE(REPLACE(v.title,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(v.body,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(u.display_name,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(t.title,'ي','ی'),'ك','ک') LIKE ?)";
-        if(is_string($d['mentor_id']??null)&&$d['mentor_id']!==''){$where.=' AND e.mentor_id=?';$args[]=$d['mentor_id'];}foreach(['term','topic','issue'] as $key){if(is_string($d[$key]??null)&&$d[$key]!==''){$where.=' AND t.active=1 AND (t.id=? OR t.parent_id=?)';$args[]=$d[$key];$args[]=$d[$key];}}
+    {(new Taxonomy($this->db))->storage();$q=Policy::query($d['q']??'');$args=[$q,$q,$q,$q,$q];$where="m.status='active' AND u.status='active' AND (REPLACE(REPLACE(v.title,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(v.body,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(u.display_name,'ي','ی'),'ك','ک') LIKE ? OR REPLACE(REPLACE(t.title,'ي','ی'),'ك','ک') LIKE ? OR EXISTS(SELECT 1 FROM m_experience_issues qi JOIN m_terms qt ON qt.id=qi.term_id WHERE qi.version_id=v.id AND qt.active=1 AND REPLACE(REPLACE(qt.title,'ي','ی'),'ك','ک') LIKE ?))";
+        if(is_string($d['mentor_id']??null)&&$d['mentor_id']!==''){$where.=' AND e.mentor_id=?';$args[]=$d['mentor_id'];}foreach(['term','topic','issue'] as $key){if(is_string($d[$key]??null)&&$d[$key]!==''){$where.=' AND EXISTS(SELECT 1 FROM m_terms ft WHERE ft.id=? AND '.Taxonomy::condition().($key==='term'?'':" AND ft.kind='".$key."'").')';$args[]=$d[$key];}}
         if(\Morshed\Core\Upgrade::ready($this->db)){foreach(['outcome','target_audience','constraints'] as $filter){if(!empty($d[$filter])){$where.=' AND EXISTS(SELECT 1 FROM m_experience_details x WHERE x.version_id=v.id AND x.'.$filter.($filter==='outcome'?'=?':' LIKE ?').')';$args[]=$filter==='outcome'?Policy::choice($d[$filter],['success','failure','mixed','unknown']):Policy::query($d[$filter]);}}}
         return [" FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id LEFT JOIN m_terms t ON t.id=v.term_id WHERE $where",$args];}
     public function experienceTotal(array $d=[]):int{[$sql,$args]=$this->experienceFilter($d);return (int)$this->db->run('SELECT COUNT(*)'.$sql,$args)->fetchColumn();}
@@ -70,7 +78,7 @@ final class Content
     private function publicNarrative(array $record):array
     {
         $case=(new ExperienceCases($this->db,$this->audit))->details($record['version_id'],true);
-        if($case){$parts=[];foreach(ExperienceCases::NARRATIVE as $key=>$label){if(trim($case[$key]??'')!==''){$parts[]=$label."\n".$case[$key];}}$record['body']=implode("\n\n",$parts);if(array_key_exists('summary',$record)){$record['summary']=$case['problem']??'';}}
+        if($case){$parts=[];foreach(ExperienceCases::NARRATIVE as $key=>$label){if(trim($case[$key]??'')!==''){$parts[]=$label."\n".$case[$key];}}$record['body']=implode("\n\n",$parts);$record['summary']=$case['problem']??'';}
         unset($record['outcome']);return $record;
     }
     public function saveStore(array $a,array $blocks):string
@@ -90,10 +98,10 @@ final class Content
             $b['mode']=$b['mode']??(!empty($b['ids'])?'manual':'auto');$b['layout']=$b['layout']??'rail';$b['items']=[];
             if(in_array($b['type'],['mentors','experiences','topics'],true)){
                 if($b['mode']==='manual'){foreach($b['ids'] as $id){try{
-                    $item=match($b['type']){'mentors'=>$this->mentor($id),'experiences'=>$this->experience($id),'topics'=>$this->db->one("SELECT id,title,kind FROM m_terms WHERE id=? AND active=1",[$id])};
+                    $item=match($b['type']){'mentors'=>$this->mentor($id),'experiences'=>$this->experience($id),'topics'=>$this->db->one("SELECT id,title,kind FROM m_terms WHERE id=? AND kind='topic' AND active=1",[$id])};
                     if($item){$b['items'][]=$item;}
                 }catch(Problem $e){if($e->status!==404){throw $e;}}}}
-                else{$b['items']=array_slice(match($b['type']){'mentors'=>$this->mentors(['term'=>$b['term']]),'experiences'=>$this->experiences(['term'=>$b['term']]),'topics'=>$this->terms()},0,$b['count']??12);}
+                else{$b['items']=array_slice(match($b['type']){'mentors'=>$this->mentors(['term'=>$b['term']]),'experiences'=>$this->experiences(['term'=>$b['term']]),'topics'=>(new Taxonomy($this->db))->topics()},0,$b['count']??12);}
             }$b['items']=array_slice($b['items'],0,$b['count']??12);$out[]=$b;
         }return $out;
     }

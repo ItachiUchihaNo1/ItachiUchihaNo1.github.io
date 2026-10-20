@@ -18,5 +18,5 @@ assert 'aria-pressed="true"' in get('/account/saved')
 assert post('/account/saved/set',{'mentor_id':mentor,'saved':'1'})['saved'] is True
 assert get('/account/saved').count('class="catalog-card catalog-mentor"')==1
 assert post('/account/saved/set',{'mentor_id':mentor,'saved':'0'})['saved'] is False
-assert 'هنوز مرشدی ذخیره نکرده‌ای' in get('/account/saved')
+assert 'هنوز مرشدی نپسندیده‌ای' in get('/account/saved')
 print('PASS real authenticated HTTP save, repeated save, persisted list and removal')

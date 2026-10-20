@@ -93,6 +93,7 @@ try:
     php_run('release03.php')
     php_run('admin07.php')
     php_run('catalog12.php')
+    php_run('taxonomy13.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')
     replies=race(fixture['booking_race']);assert any(x.get('code')=='SLOT_UNAVAILABLE' for x in replies);ok('two concurrent reservation requests cannot consume the same capacity')
@@ -139,10 +140,14 @@ try:
     ok('incomplete account cannot use protected services before completing local credentials')
     status,body,_=guest.post('/account/saved/set',{'mentor_id':fixture['user_id'],'saved':'1'});assert status==401
     assert_status(site,'/api/v1/account/saved/set',419,{'mentor_id':fixture['user_id'],'saved':'1'})
-    html=assert_status(site,'/account/saved',200);assert 'مرشدهای پسندیده' in html
-    public=assert_status(guest,'/mentors',200);assert 'catalog-mentor' in public and 'data-mentor-save' not in public and 'ورود برای ذخیره' in public
+    html=assert_status(site,'/account/saved',200);assert 'نوع پسندها' in html and 'پسندها' in html
+    public=assert_status(guest,'/mentors',200);assert 'catalog-mentor' in public and 'data-mentor-save' not in public and 'ورود برای پسندیدن' in public
     public=assert_status(guest,'/experiences',200);assert 'catalog-experience' in public and 'بازدید' in public and 'خواندن تجربه' in public
     ok('saved lists require authentication and saves require CSRF while public cards remain readable')
+    html=assert_status(guest,'/topics',200);assert 'موضوع‌های تجربه' in html and 'topic-tile' in html
+    html=assert_status(site,'/account/saved?tab=experiences',200);assert 'نوع پسندها' in html and 'aria-current="page"' in html
+    ok('topics directory and both account-owned saved tabs render without exposing private experience fields')
+
 
 
     hub=assert_status(site,'/account',200);assert 'account-hub' in hub and 'name="first_name"' not in hub and 'name="current_password"' not in hub
@@ -378,7 +383,7 @@ if($c['environment']!=='testing'||!preg_match('/dbname=(morshed_test_[a-f0-9]+);
 $original=new Morshed\Core\Database($c['database']);$copyConfig=$c['database'];$clone='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$clone.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($match[1],$clone,$copyConfig['dsn']);$restored=new Morshed\Core\Database($copyConfig);$restored->pdo->exec(file_get_contents($argv[2]));
 foreach($original->all('SHOW TABLES') as $row){$table=array_values($row)[0];if(!preg_match('/^m_[a-z_]+$/D',$table))throw new RuntimeException('Unexpected table');$keys=$original->all('SHOW KEYS FROM `'.$table.'` WHERE Key_name=\'PRIMARY\'');usort($keys,fn($a,$b)=>(int)$a['Seq_in_index']<=>(int)$b['Seq_in_index']);$order=implode(',',array_map(fn($k)=>'`'.$k['Column_name'].'`',$keys));$sql='SELECT * FROM `'.$table.'` ORDER BY '.$order;if($original->all($sql)!==$restored->all($sql))throw new RuntimeException('Restore mismatch '.$table);}
 $restored->run('UPDATE m_auth_sessions SET revoked_at=? WHERE revoked_at IS NULL',[time()]);$restored->run('UPDATE m_otp_challenges SET consumed_at=? WHERE consumed_at IS NULL',[time()]);$restored->run('UPDATE m_external_flows SET consumed_at=? WHERE consumed_at IS NULL',[time()]);if((int)$restored->run('SELECT COUNT(*) FROM m_auth_sessions WHERE revoked_at IS NULL')->fetchColumn()!==0)throw new RuntimeException('Restored sessions not invalidated');
-$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));(new Morshed\Product\Catalog($empty))->savedIds(str_repeat('0',32));if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==7||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
+$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));(new Morshed\Product\Catalog($empty))->savedIds(str_repeat('0',32));(new Morshed\Product\Taxonomy($empty))->storage();if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==7||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
 echo "PASS all database rows restored and old authentication invalidated\nPASS combined empty-database installer matches numbered migrations\n";
 ''',encoding='utf-8')
         r=subprocess.run(phpcmd+[str(restore),str(configphp),str(dumpfile),str(app)],capture_output=True,text=True,encoding='utf-8');assert r.returncode==0,r.stderr
