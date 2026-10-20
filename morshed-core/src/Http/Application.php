@@ -56,7 +56,7 @@ final class Application
     private function queryString(string $key,int $max):string{ $v=$_GET[$key]??'';if(!is_string($v)||strlen($v)>$max){throw new Problem('INVALID_INPUT','پارامتر ورود معتبر نیست.');}return $v;}
     private function requireActor():array
     {
-        if(!$this->actor){if(!$this->api&&$this->method==='GET'){if(in_array($this->path,['/account','/account/security','/account/profile','/account/rules','/account/phone','/account/complete','/account/sessions','/me/sessions','/notifications','/security'],true)){$_SESSION['return_to']=$this->path;}$this->redirect('/login');}throw new Problem('UNAUTHENTICATED','ابتدا وارد حساب شوید.',401);}return $this->actor;
+        if(!$this->actor){if(!$this->api&&$this->method==='GET'){if(in_array($this->path,['/account','/account/saved','/account/saved/set','/account/security','/account/profile','/account/rules','/account/phone','/account/complete','/account/sessions','/me/sessions','/notifications','/security'],true)){$_SESSION['return_to']=$this->path;}$this->redirect('/login');}throw new Problem('UNAUTHENTICATED','ابتدا وارد حساب شوید.',401);}return $this->actor;
     }
     private function csrf():void
     {
