@@ -107,10 +107,10 @@ final class Knowledge
                 foreach($edges as $edge){$f=$edge['source']===$from?$into:$edge['source'];$t=$edge['target']===$from?$into:$edge['target'];$adj[$f][]=$t;}
                 $colors=[];$visit=function($node)use(&$visit,&$colors,$adj){if(($colors[$node]??0)===1){throw new Problem('MERGE_CYCLE','این ادغام سلسله‌مراتب را نامعتبر می‌کند؛ ابتدا روابط را بازبینی کنید.',409);}if(($colors[$node]??0)===2){return;}$colors[$node]=1;foreach($adj[$node]??[] as $next){$visit($next);}$colors[$node]=2;};foreach(array_keys($adj) as $node){$visit($node);}
             }
-            $this->db->run('INSERT INTO m_term_redirects VALUES(?,?,?,?)',[$from,$into,$a['user_id'],time()]);$this->db->run('UPDATE m_term_redirects SET target_id=? WHERE target_id=?',[$into,$from]);
+            if($source['kind']==='topic'&&$this->db->one('SELECT ancestor_id FROM m_topic_paths WHERE ancestor_id=? AND descendant_id=?',[$from,$into])){throw new Problem('MERGE_CYCLE','ابتدا رابطهٔ والد و فرزند را اصلاح کنید.',409);}$this->db->run('INSERT INTO m_term_redirects VALUES(?,?,?,?)',[$from,$into,$a['user_id'],time()]);$this->db->run('UPDATE m_term_redirects SET target_id=? WHERE target_id=?',[$into,$from]);
             $this->db->run('INSERT IGNORE INTO m_term_aliases VALUES(?,?)',[$into,$source['title']]);$this->db->run('INSERT IGNORE INTO m_term_aliases SELECT ?,alias FROM m_term_aliases WHERE term_id=?',[$into,$from]);
             // Historical versions retain their IDs. Queries resolve redirects; no content/booking history is rewritten.
-            $this->db->run('UPDATE m_terms SET active=0 WHERE id=?',[$from]);$this->history($a,$from,'taxonomy.merged',$source,['into'=>$into]);
+            if($source['kind']==='issue'){$this->db->run('INSERT IGNORE INTO m_issue_topics SELECT ?,topic_id FROM m_issue_topics WHERE issue_id=?',[$into,$from]);}else{$this->db->run('INSERT IGNORE INTO m_issue_topics SELECT issue_id,? FROM m_issue_topics WHERE topic_id=?',[$into,$from]);}$this->db->run('UPDATE m_terms SET parent_id=? WHERE parent_id=? AND id<>?',[$into,$from,$into]);$this->db->run('UPDATE m_terms SET active=0 WHERE id=?',[$from]);(new ClassificationDetails($this->db))->rebuildPaths();$this->history($a,$from,'taxonomy.merged',$source,['into'=>$into]);
         });
     }
     public function projectedEdges(string $experience):array

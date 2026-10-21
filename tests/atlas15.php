@@ -65,7 +65,7 @@ a15('valid interaction is private and idempotent',function()use($events,$user,$e
 a15('disabling collection preserves approved retention and expired-event cleanup',function()use($events,$a,$db){no15('POLICY_REQUIRED',fn()=>$events->configure($a,false,null,true));$db->run('UPDATE m_interaction_events SET created_at=?',[time()-40*86400]);$events->configure($a,false,null,false);$p=$db->one('SELECT enabled,retention_days,approved_at FROM m_interaction_policy WHERE id=1');eq15((int)$p['enabled'],0);eq15((int)$p['retention_days'],30);eq15((bool)$p['approved_at'],true);eq15($events->purge()>0,true);$events->configure($a,true,30,true);});
 a15('collector refuses to write within business transaction',function()use($db,$events,$user,$eid){$db->tx(function()use($events,$user,$eid){eq15($events->record($user,'EXPERIENCE_VIEWED','EXPERIENCE',$eid,[],'inside'),false);});});
 a15('unimplemented communication cannot emit session-started',fn()=>eq15($events->record($user,'SESSION_STARTED','SESSION',$eid,[],'fake'),false));
-a15('public booking gate remains closed',fn()=>eq15((new Consultations($db,$audit))->publicBookingOpen(),false));
+a15('public request intake is enabled by the owner',fn()=>eq15((new Consultations($db,$audit))->publicBookingOpen(),true));
 $alias='همنام آزمون '.Security::id();$k->aliases($a,$issue,$alias);
 a15('taxonomy aliases participate in ordinary experience search',function()use($db,$audit,$alias,$eid){$rows=(new Morshed\Product\Content($db,$audit))->experiences(['q'=>$alias]);eq15(in_array($eid,array_column($rows,'id'),true),true);});
 a15('atlas text search recognizes classification aliases',fn()=>eq15($atlas->discover(['q'=>$alias,'mentor_id'=>$mentor],true)['total'],1));

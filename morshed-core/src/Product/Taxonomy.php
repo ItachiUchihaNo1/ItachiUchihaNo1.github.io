@@ -11,6 +11,7 @@ final class Taxonomy
     public function __construct(private Database $db){}
     public function storage():void
     {
+        (new ClassificationDetails($this->db))->storage();
         if($this->ready||$this->db->featureReady('taxonomy15')){return;}
         try{$this->db->run('SELECT term_id FROM m_term_icons LIMIT 0');$this->db->run('SELECT version_id FROM m_experience_issues LIMIT 0');$this->db->run('SELECT version_id FROM m_experience_topics LIMIT 0');$this->db->run('SELECT source_id FROM m_term_redirects LIMIT 0');$this->db->run('SELECT alias FROM m_term_aliases LIMIT 0');}
         catch(\PDOException $e){
@@ -23,14 +24,14 @@ final class Taxonomy
         }$this->ready=true;$this->db->markFeatureReady('taxonomy15');
     }
     public function decorate(array $rows):array
-    {$this->storage();$icons=array_column($this->db->all('SELECT term_id,icon FROM m_term_icons'),'icon','term_id');foreach($rows as &$row){$row['icon']=$icons[$row['id']]??'book';}unset($row);return $rows;}
+    {$this->storage();$icons=array_column($this->db->all('SELECT term_id,icon FROM m_term_icons'),'icon','term_id');$meta=(new ClassificationDetails($this->db))->metadata();foreach($rows as &$row){$row['icon']=$icons[$row['id']]??'book';$row+=($meta[$row['id']]??['short_label'=>'','description'=>'','icon_asset_id'=>null,'display_order'=>0]);}unset($row);$index=array_column($rows,null,'id');foreach($rows as &$row){$trail=[$row['title']];$parent=$row['parent_id']??null;$seen=[$row['id']=>true];while($parent&&isset($index[$parent])&&!isset($seen[$parent])){$seen[$parent]=true;array_unshift($trail,$index[$parent]['title']);$parent=$index[$parent]['parent_id']??null;}$row['path_title']=implode(' / ',$trail);}unset($row);return $rows;}
     public function icon(string $id,string $icon):void
     {Policy::choice($icon,array_keys(self::ICONS));$this->db->run('INSERT INTO m_term_icons(term_id,icon) VALUES(?,?) ON DUPLICATE KEY UPDATE icon=VALUES(icon)',[$id,$icon]);}
     public static function condition(string $version='v',string $term='ft'):string
     {
         // Aliases come only from source code. Every filter binds the chosen identifier separately.
         if(!preg_match('/^[a-z]+$/D',$version)||!preg_match('/^[a-z]+$/D',$term)){throw new \LogicException('Invalid query alias.');}
-        return "$term.active=1 AND (($term.kind='topic' AND ($version.term_id=$term.id OR EXISTS(SELECT 1 FROM m_term_redirects rd WHERE rd.source_id=$version.term_id AND rd.target_id=$term.id) OR EXISTS(SELECT 1 FROM m_experience_topics xt LEFT JOIN m_term_redirects xr ON xr.source_id=xt.term_id WHERE xt.version_id=$version.id AND COALESCE(xr.target_id,xt.term_id)=$term.id) OR EXISTS(SELECT 1 FROM m_terms legacy WHERE legacy.id=$version.term_id AND legacy.kind='issue' AND legacy.active=1 AND legacy.parent_id=$term.id))) OR ($term.kind='issue' AND ($version.term_id=$term.id OR EXISTS(SELECT 1 FROM m_term_redirects rd WHERE rd.source_id=$version.term_id AND rd.target_id=$term.id) OR EXISTS(SELECT 1 FROM m_experience_issues xi LEFT JOIN m_term_redirects xr ON xr.source_id=xi.term_id WHERE xi.version_id=$version.id AND COALESCE(xr.target_id,xi.term_id)=$term.id))))";
+        return "$term.active=1 AND (($term.kind='topic' AND ($version.term_id=$term.id OR EXISTS(SELECT 1 FROM m_topic_paths tp WHERE tp.ancestor_id=$term.id AND tp.descendant_id=$version.term_id) OR EXISTS(SELECT 1 FROM m_term_redirects rd WHERE rd.source_id=$version.term_id AND rd.target_id=$term.id) OR EXISTS(SELECT 1 FROM m_experience_topics xt LEFT JOIN m_term_redirects xr ON xr.source_id=xt.term_id WHERE xt.version_id=$version.id AND (COALESCE(xr.target_id,xt.term_id)=$term.id OR COALESCE(xr.target_id,xt.term_id) IN (SELECT descendant_id FROM m_topic_paths WHERE ancestor_id=$term.id))) OR EXISTS(SELECT 1 FROM m_terms legacy WHERE legacy.id=$version.term_id AND legacy.kind='issue' AND legacy.active=1 AND legacy.parent_id=$term.id))) OR ($term.kind='issue' AND ($version.term_id=$term.id OR EXISTS(SELECT 1 FROM m_topic_paths tp WHERE tp.ancestor_id=$term.id AND tp.descendant_id=$version.term_id) OR EXISTS(SELECT 1 FROM m_term_redirects rd WHERE rd.source_id=$version.term_id AND rd.target_id=$term.id) OR EXISTS(SELECT 1 FROM m_experience_issues xi LEFT JOIN m_term_redirects xr ON xr.source_id=xi.term_id WHERE xi.version_id=$version.id AND COALESCE(xr.target_id,xi.term_id)=$term.id))))";
     }
     public function labels(array $versions):array
     {
@@ -43,7 +44,7 @@ final class Taxonomy
         }
         foreach($out as &$labels){$labels['topics']=$labels['topic']?[$labels['topic']['id']=>$labels['topic']]:[];}unset($labels);
         foreach($this->db->all("SELECT x.version_id,t.id,t.title,t.kind,COALESCE(i.icon,'book') AS icon FROM (SELECT version_id,term_id FROM m_experience_issues WHERE version_id IN ($marks) UNION SELECT version_id,term_id FROM m_experience_topics WHERE version_id IN ($marks)) x LEFT JOIN m_term_redirects xr ON xr.source_id=x.term_id JOIN m_terms t ON t.id=COALESCE(xr.target_id,x.term_id) AND t.active=1 LEFT JOIN m_term_icons i ON i.term_id=t.id ORDER BY t.title",[...$versions,...$versions]) as $row){$key=$row['kind']==='topic'?'topics':'issues';$out[$row['version_id']][$key][$row['id']]=['id'=>$row['id'],'title'=>$row['title'],'icon'=>$row['icon']];}
-        foreach($out as &$labels){$labels['issues']=array_values($labels['issues']);$labels['topics']=array_values($labels['topics']);}unset($labels);return $out;
+        $metadata=(new ClassificationDetails($this->db))->metadata();foreach($out as &$labels){foreach($labels['issues'] as &$issue){$issue['full_title']=$issue['title'];$issue['title']=$metadata[$issue['id']]['short_label']??''?:$issue['title'];}unset($issue);$labels['issues']=array_values($labels['issues']);$labels['topics']=array_values($labels['topics']);}unset($labels);return $out;
     }
     public function assign(string $version,array $input,?string $previous):void
     {
@@ -59,8 +60,15 @@ final class Taxonomy
     public function topics():array
     {
         $this->storage();$condition=self::condition();
-        return $this->decorate($this->db->all("SELECT ft.*, (SELECT COUNT(*) FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id WHERE m.status='active' AND u.status='active' AND $condition) AS experience_count FROM m_terms ft WHERE ft.kind='topic' AND ft.active=1 ORDER BY ft.title"));
+        $rows=$this->decorate($this->db->all("SELECT ft.*, (SELECT COUNT(*) FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id WHERE m.status='active' AND u.status='active' AND $condition) AS experience_count FROM m_terms ft WHERE ft.kind='topic' AND ft.active=1 ORDER BY ft.title"));usort($rows,fn($a,$b)=>[(int)$a['display_order'],$a['title']]<=>[(int)$b['display_order'],$b['title']]);return $rows;
     }
+    public function issues():array
+    {
+        $this->storage();$condition=self::condition();$rows=$this->decorate($this->db->all("SELECT ft.*,(SELECT COUNT(*) FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id JOIN m_mentors m ON m.user_id=e.mentor_id AND m.status='active' JOIN m_users u ON u.id=m.user_id AND u.status='active' WHERE $condition) AS experience_count FROM m_terms ft WHERE ft.kind='issue' AND ft.active=1"));
+        usort($rows,fn($a,$b)=>[(int)$a['display_order'],$a['title']]<=>[(int)$b['display_order'],$b['title']]);return $rows;
+    }
+    public function issue(string $id):array
+    {$id=$this->resolve($id);foreach($this->issues() as $issue){if($issue['id']===$id){return $issue;}}throw new Problem('NOT_FOUND','مسئله در دسترس نیست.',404);}
     public function resolve(string $id):string
     {$this->storage();return $this->db->one('SELECT target_id FROM m_term_redirects WHERE source_id=?',[$id])['target_id']??$id;}
     public function topic(string $id):array

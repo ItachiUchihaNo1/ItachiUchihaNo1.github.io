@@ -17,7 +17,7 @@ class Client:
  def post(self,path,data):status,body=self.req('/api/v1'+path,data);assert status==200,(status,body);return body
 guest=Client(cfg['origins']['site']);user=Client(cfg['origins']['site']);admin=Client(cfg['origins']['admin']);anonymous=Client(cfg['origins']['admin'])
 admin.post('/auth/password',{'username':fixture['admin_username'],'password':fixture['admin_password']});user.post('/auth/password',{'phone':p['owner_phone'],'password':p['owner_password']})
-assert 'اطلس تجربه‌های مرشد' in guest.get('/atlas')
+assert 'اطلس مرشد' in guest.get('/atlas')
 assert 'data-atlas-map' in guest.get('/atlas')
 assert 'مجموعه‌های تجربه' in guest.get('/organizations')
 assert guest.req('/api/v1/knowledge')[0]==403

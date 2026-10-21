@@ -16,7 +16,8 @@ final class AtlasController
             if(in_array($path,['/atlas','/organizations'],true)){
                 $filters=$_GET;if($path==='/organizations'){$filters['layer']='organizations';}
                 $data=$this->atlas->discover($filters,$path==='/atlas');$data+=['isAtlas'=>$path==='/atlas','provinces'=>$this->atlas->places(),'counties'=>!empty($data['province'])?$this->atlas->places($data['province']):[],'terms'=>(new Taxonomy($this->db))->topics(),'issues'=>$this->db->all("SELECT id,title FROM m_terms WHERE kind='issue' AND active=1 ORDER BY title")];
-                $this->render($path==='/atlas'?'اطلس تجربه‌های مرشد':'مجموعه‌های تجربه','atlas',$data);return true;
+                if($path==='/atlas'&&!$data['province']&&!$data['county']&&$data['layer']!=='organizations'&&$data['total']===0){$data['unlocated']=$this->atlas->discover($filters,false)['rows'];}
+                $this->render($path==='/atlas'?'اطلس مرشد':'مجموعه‌های تجربه','atlas',$data);return true;
             }
             if($path==='/organization'){$id=$_GET['id']??'';if(!is_string($id)){throw new Problem('NOT_FOUND','مجموعه پیدا نشد.',404);}$data=$this->atlas->organization($id,['page'=>$_GET['page']??1,'mentor_page'=>$_GET['mentor_page']??1]);$this->render($data['organization']['name'],'organization',$data);return true;}
         }elseif($path==='/atlas/manage'){

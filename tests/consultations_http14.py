@@ -16,7 +16,7 @@ class Client:
  def get(self,path):status,body=self.req(path);assert status==200,(status,body);return body
  def post(self,path,data):status,body=self.req('/api/v1'+path,data);assert status==200,(status,body);return body
 host=Client(cfg['origins']['site']);user=Client(cfg['origins']['site']);admin=Client(cfg['origins']['admin'])
-host.post('/auth/password',{'phone':p['mentor_phone'],'password':p['mentor_password']});user.post('/auth/password',{'phone':p['owner_phone'],'password':p['owner_password']});admin.post('/auth/password',{'username':'test_admin','password':'Correct-Test-Admin-471!'})
+host.post('/auth/password',{'phone':p['mentor_phone'],'password':p['mentor_password']});user.post('/auth/password',{'phone':p['owner_phone'],'password':p['owner_password']});admin.post('/auth/password',{'username':fixture['admin_username'],'password':fixture['admin_password']})
 assert 'زمان‌های مشاوره من' in host.get('/account')
 own=host.get('/mentor/experiences');assert 'نوشتن تجربه' not in own and 'ویرایش</a>' not in own and p['experience_id'] in own
 assert user.req('/api/v1/mentor/calendar')[0]==403
@@ -30,8 +30,7 @@ cal=host.get('/api/v1/mentor/calendar');rule=next(r for r in cal['dates'] if r['
 host.post('/mentor/calendar/rule',{'kind':'date','id':rule['id'],'date':date,'weekday':0,'start_time':'12:00','end_time':'15:00'})
 slots=host.get('/api/v1/slots?mentor_id='+p['mentor_id']+'&date='+date)['slots'];assert slots
 data={'user_id':p['owner'],'mentor_id':p['mentor_id'],'starts_at':slots[0]['starts_at'],'subject':'موضوع جلسه آزمایشی','problem':'شرح نیاز کاربر در آزمون رابط','experience_id':p['experience_id'],'requested_method':'audio','idempotency_key':secrets.token_hex(16)}
-assert user.req('/api/v1/bookings/create',data)[0]==503
-booking=admin.post('/bookings/internal',data)['id'];route='/api/v1/booking?id='+booking
+booking=user.post('/bookings/create',dict(data,duration_minutes=30))['id'];route='/api/v1/booking?id='+booking
 assert host.get(route)['booking']['experience_id']==p['experience_id']
 assert any(r['id']==booking for r in host.get('/api/v1/sessions?direction=incoming')['rows'])
 assert any(r['id']==booking for r in user.get('/api/v1/sessions?direction=outgoing')['rows'])

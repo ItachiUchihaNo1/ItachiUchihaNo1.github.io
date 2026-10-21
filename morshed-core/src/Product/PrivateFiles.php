@@ -10,7 +10,7 @@ final class PrivateFiles
     public static function inspect(string $path,string $name):array
     {
         if(!class_exists(\finfo::class)){throw new Problem('FILEINFO_REQUIRED','افزونه fileinfo برای بارگذاری لازم است.',503);}$size=filesize($path);if(!$size||$size>5242880){throw new Problem('INVALID_FILE','اندازه فایل باید بین یک بایت و پنج مگابایت باشد.');}
-        $name=Policy::text($name,180);if(preg_match('/[\x00-\x1F\x7F\\\\\/]/',$name)){throw new Problem('INVALID_FILE','نام فایل معتبر نیست.');}$mime=(new \finfo(FILEINFO_MIME_TYPE))->file($path);$ext=strtolower(pathinfo($name,PATHINFO_EXTENSION));$allowed=['image/png'=>['png'],'image/jpeg'=>['jpg','jpeg'],'application/pdf'=>['pdf']];
+        $name=Policy::text($name,180);if(preg_match('/[\x00-\x1F\x7F\\\\\/]/',$name)){throw new Problem('INVALID_FILE','نام فایل معتبر نیست.');}$mime=(new \finfo(FILEINFO_MIME_TYPE))->file($path);$ext=strtolower(pathinfo($name,PATHINFO_EXTENSION));$allowed=['image/png'=>['png'],'image/jpeg'=>['jpg','jpeg'],'image/webp'=>['webp'],'application/pdf'=>['pdf']];
         if(!isset($allowed[$mime])||!in_array($ext,$allowed[$mime],true)){throw new Problem('INVALID_FILE','فقط PNG، JPEG و PDF با نوع و پسوند منطبق مجازند.');}
         if(str_starts_with($mime,'image/')){$image=@getimagesize($path);if(!$image||$image[0]*$image[1]>20000000){throw new Problem('INVALID_FILE','ابعاد تصویر معتبر نیست یا بیش از حد بزرگ است.');}}
         elseif(file_get_contents($path,false,null,0,5)!=='%PDF-'){throw new Problem('INVALID_FILE','ساختار فایل PDF معتبر نیست.');}

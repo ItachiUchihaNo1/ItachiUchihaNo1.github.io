@@ -1,4 +1,4 @@
 <section class="hero"><div><span class="eyebrow">تجربه عملی، گفت‌وگوی مستقیم</span><h1>مسئله‌ات را با یک<br>مرشد در میان بگذار</h1><p>تجربه‌های واقعی را بشناس و برای گفت‌وگو با مرشد همراه شو.</p><a class="primary" href="<?= $this->h($this->url('/account')) ?>">ورود به حساب</a></div><img class="hero-logo" src="/assets/morshed-logo-288.webp" alt="نشان رسمی مرشد" width="240" height="240"></section>
 <div class="grid2 section"><article class="card"><h2>مرشدهای دارای تجربه عملی</h2><p>فهرست مرشدها هنوز فعال نشده است.</p></article><article class="card"><h2>از تجربه تا گفت‌وگو</h2><p>بانک تجربه‌ها هنوز فعال نشده است.</p></article></div>
-<section class="notice section"><h2>پذیرش مشاوره</h2><p>رزرو عمومی فعلاً بسته است. مشاوره در نسخه اول رایگان خواهد بود.</p></section>
+<section class="notice section"><h2>پذیرش مشاوره</h2><p>ثبت درخواست مشاوره رایگان و فعال است؛ برگزاری تماس و چت هنوز آماده نیست.</p></section>
 <section class="card section"><h2>مرشد چگونه کار می‌کند؟</h2><div class="grid3 section"><p>۱. مسئله‌ات را پیدا کن</p><p>۲. مرشد را بشناس</p><p>۳. با او گفت‌وگو کن</p></div></section>

@@ -29,5 +29,9 @@ final class Policy
     public static function choice(mixed $s,array $choices):string
     {if(!is_string($s)||!in_array($s,$choices,true)){throw new Problem('INVALID_INPUT','انتخاب معتبر نیست.');}return $s;}
     public static function query(mixed $s):string
-    {return '%'.strtr(str_replace(['ي','ك'],['ی','ک'],is_string($s)?substr($s,0,160):''),['\\'=>'\\\\','%'=>'\\%','_'=>'\\_']).'%';}
+    {
+        $value=is_string($s)&&preg_match('//u',$s)?$s:'';preg_match_all('/./us',$value,$characters);
+        $value=preg_replace('/ +/u',' ',str_replace(['ي','ك','‌'],['ی','ک',' '],implode('',array_slice($characters[0],0,160))));
+        return '%'.strtr($value,['\\'=>'\\\\','%'=>'\\%','_'=>'\\_']).'%';
+    }
 }

@@ -28,6 +28,7 @@ final class Application
         $this->accounts=new Accounts($this->db,$rate,$audit,new TsmsSendOnlyGateway($config['sms']??[],new CurlFormTransport()),$config['app_key']);
         $this->legal=new Documents($this->db,$audit);$this->external=new ExternalAccounts($this->db,$audit,$rate,new ProviderHttp(),$config);
         $token=$_COOKIE[$this->cookie]??null;$this->actor=$this->sessions->resolve(is_string($token)?$token:null,$realm);
+        if($realm==='site'&&$this->actor){$this->actor['avatar_asset_id']=(new \Morshed\Product\ContentAssets($this->db,$audit))->avatar($this->actor['user_id']);}
         $config['_schema_version']=(int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn();$this->view=new View($config,$realm,$_SESSION['csrf'],$this->actor);
         $raw=$_GET['r']??parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH);
         if(!is_string($raw)||strlen($raw)>200||!str_starts_with($raw,'/')||str_contains($raw,'..')){throw new Problem('NOT_FOUND','صفحه پیدا نشد.',404);}
@@ -273,7 +274,7 @@ final class Application
         if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/me/profile'=>'/account/profile','/me/password','/me/identities/unlink'=>'/account/security','/legal/accept'=>'/account/rules','/me/eitaa/contact','/me/eitaa/phone/request'=>'/account/identify','/users/status','/users/delete','/users/restore'=>'/users','/users/update','/users/role'=>'/users/edit','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/account/avatar','/me/profile'=>'/account/profile','/me/password','/me/identities/unlink'=>'/account/security','/legal/accept'=>'/account/rules','/me/eitaa/contact','/me/eitaa/phone/request'=>'/account/identify','/users/status','/users/delete','/users/restore'=>'/users','/users/update','/users/role'=>'/users/edit','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());

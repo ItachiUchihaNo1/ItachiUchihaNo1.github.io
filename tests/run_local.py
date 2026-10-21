@@ -24,15 +24,20 @@ ini=scratch/'php.ini'
 ini.write_text('extension_dir="'+str(php.parent/'ext').replace('\\','/')+'"\nextension=pdo_mysql\nextension=openssl\nextension=curl\nextension=fileinfo\ndisplay_errors=0\nlog_errors=1\n',encoding='utf-8')
 phpcmd=[str(php),'-c',str(ini)]
 token=secrets.token_hex(32)
+http_manual_password=secrets.token_urlsafe(24)
+_sample_phones={}
+def sample_phone(key):
+    if key not in _sample_phones:_sample_phones[key]='09'+str(secrets.randbelow(10**9)).zfill(9)
+    return _sample_phones[key]
 cfg={'environment':'testing','app_key':secrets.token_hex(32),'origins':{'site':f'http://127.0.0.1:{webport}','admin':f'http://127.0.0.1:{adminport}'},
      'allow_http_loopback':True,'pretty_urls':False,'database':{'dsn':f'mysql:host=127.0.0.1;port={dbport};dbname=morshed_test_{secrets.token_hex(8)};charset=utf8mb4','user':'root','password':''},
      'setup':{'enabled':True,'token_sha256':hashlib.sha256(token.encode()).hexdigest()},'sms':{'enabled':False},
-     'test_setup_token':token,'test_fixture_path':str(scratch/'fixture.json')}
+     'test_setup_token':token,'test_manual_password':http_manual_password,'test_fixture_path':str(scratch/'fixture.json')}
 config=scratch/'private-config.json';config.write_text(json.dumps(cfg),encoding='utf-8')
 configphp=scratch/'private-config.php';configphp.write_text("<?php return json_decode(file_get_contents(__DIR__.'/private-config.json'),true,512,JSON_THROW_ON_ERROR);",encoding='utf-8')
 local=app/'morshed-core/config/local.php';local.write_text("<?php return json_decode(file_get_contents('"+str(config).replace('\\','/')+"'),true,512,JSON_THROW_ON_ERROR);",encoding='utf-8')
 def wait_port(p):
-    for _ in range(300):
+    for _ in range(1200):
         try:
             with socket.create_connection(('127.0.0.1',p),timeout=.15):return
         except OSError:time.sleep(.1)
@@ -95,8 +100,11 @@ try:
     php_run('catalog12.php')
     php_run('taxonomy13.php')
     php_run('consultations14.php')
+    php_run('consultations16.php')
     php_run('performance14.php')
     php_run('atlas15.php')
+    php_run('classification17.php')
+    php_run('http_fixture_secret.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')
     replies=race(fixture['booking_race']);assert any(x.get('code')=='SLOT_UNAVAILABLE' for x in replies);ok('two concurrent reservation requests cannot consume the same capacity')
@@ -122,13 +130,13 @@ try:
 
     assert_status(guest,'/api/v1/auth/eitaa/context',419,{'init_data':'forged'})
     status,body,_=guest.post('/auth/eitaa/context',{'init_data':'forged'});assert status==503
-    cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':'test-only-eitaa-token-123456'};config.write_text(json.dumps(cfg),encoding='utf-8')
+    cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':secrets.token_urlsafe(32)};config.write_text(json.dumps(cfg),encoding='utf-8')
     status,home,headers=guest.request('/');assert status==200 and 'developer.eitaa.com' in headers['Content-Security-Policy'] and 'eitaa-context' in home
     status,body,_=guest.post('/auth/eitaa/context',{'init_data':'hash=forged'});assert status==401
     assert_status(guest,'/api/v1/me',401)
     status,body,_=guest.post('/auth/eitaa/start',{'purpose':'login','init_data':'hash=forged'});assert status==401 and 'INVALID_ASSERTION' in body
     assert_status(guest,'/api/v1/me',401);ok('Eitaa launch context never authenticates and forged cached data cannot create a session')
-    cfg['google']={'enabled':True,'live_verified':True,'client_id':'123456789-testclient.apps.googleusercontent.com','client_secret':'TEST ONLY','redirect_uri':'https://example.test/callback'};config.write_text(json.dumps(cfg),encoding='utf-8')
+    cfg['google']={'enabled':True,'live_verified':True,'client_id':'123456789-testclient.apps.googleusercontent.com','client_secret':secrets.token_urlsafe(32),'redirect_uri':'https://example.test/callback'};config.write_text(json.dumps(cfg),encoding='utf-8')
     status,body,headers=guest.request('/login');policy=headers['Content-Security-Policy'];assert "form-action 'self' https://accounts.google.com https://eitaa.com" in policy and 'unsafe-inline' not in policy
     status,body,headers=adminclient.request('/login');assert "form-action 'self'" in headers['Content-Security-Policy'] and 'accounts.google.com' not in headers['Content-Security-Policy']
     cfg.pop('google');ok('external form redirects are allowed only to configured official destinations on the main site')
@@ -180,7 +188,7 @@ try:
     pendingclient=Client(cfg['origins']['site']);pendingclient.request('/api/v1/csrf')
     pendingsid=next(c.value for c in pendingclient.jar if c.name=='morshed_dev_csrf_site')
     pendingbridge=json.loads(subprocess.check_output(phpcmd+[str(app/'tests/eitaa_pending_fixture.php'),str(configphp),pendingsid],text=True,encoding='utf-8'))
-    cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':'test-only-eitaa-token-123456'};config.write_text(json.dumps(cfg),encoding='utf-8')
+    cfg['eitaa']={'enabled':True,'live_verified':True,'app_token':secrets.token_urlsafe(32)};config.write_text(json.dumps(cfg),encoding='utf-8')
     html=assert_status(pendingclient,'/account/identify',200);assert 'data-eitaa-contact' in html and '/account/complete' not in html
     status,body,_=pendingclient.post('/auth/otp/verify',{'challenge_id':'0'*32,'code':pendingbridge['code']});assert status==401 and 'INVALID_STATE' in body
     status,body,_=pendingclient.post('/auth/otp/verify',{'challenge_id':pendingbridge['challenge_id'],'code':pendingbridge['code']});assert status==200 and 'complete' in json.loads(body)['redirect']
@@ -192,7 +200,7 @@ try:
 
     redirectclient=Client(cfg['origins']['site']);redirectclient.request('/favicon.ico')
     status,body,_=redirectclient.request('/api/v1/csrf');redirectcsrf=json.loads(body)['csrf']
-    form=urllib.parse.urlencode({'csrf':redirectcsrf,'login':'manual_release03','password':'Eight123'}).encode()
+    form=urllib.parse.urlencode({'csrf':redirectcsrf,'login':'manual_release03','password':http_manual_password}).encode()
     response=redirectclient.opener.open(urllib.request.Request(redirectclient.base+'/index.php?r=%2Fauth%2Fpassword',data=form,headers={'Content-Type':'application/x-www-form-urlencoded'}))
     assert '%2Faccount' in response.url and 'حساب من' in response.read().decode('utf-8')
     ok('browser favicon requests cannot replace the destination after username login')
@@ -212,7 +220,7 @@ try:
     legacy=assert_status(site,'/mentor',200);assert 'account-hub' in legacy and 'دعوت مدیریت' not in legacy
     status,body,_=adminclient.post('/users/role',{'id':fixture['user_id'],'role':'user','current_password':fixture['admin_password']});assert status==200,(status,body)
     ok('admin role assignment immediately adds badge without a mentor panel and can be reversed without deleting account')
-    logoutclient=Client(cfg['origins']['site']);status,body,_=logoutclient.post('/auth/password',{'login':'manual_release03','password':'Eight123'});assert status==200
+    logoutclient=Client(cfg['origins']['site']);status,body,_=logoutclient.post('/auth/password',{'login':'manual_release03','password':http_manual_password});assert status==200
     status,body,_=logoutclient.post('/logout',{});assert status==200 and json.loads(body)['redirect']=='/index.php?r=%2F'
     assert_status(logoutclient,'/api/v1/me',401)
     ok('site logout revokes only its session and returns to public storefront rather than a broken or forced-login page')
@@ -245,7 +253,7 @@ try:
     ok('admin edit validation retains personal form values and never echoes password')
     html=assert_status(adminclient,'/login',200);assert 'راه‌اندازی اولین مدیر با کلید نصب' not in html
     assert_status(adminclient,'/setup',404)
-    status,body,_=site.post('/me/phone/request',{'phone':'09120001111','current_password':fixture['password']});assert status==403 and 'PHONE_READ_ONLY' in body
+    status,body,_=site.post('/me/phone/request',{'phone':sample_phone('contact1'),'current_password':fixture['password']});assert status==403 and 'PHONE_READ_ONLY' in body
     status,body,_=adminclient.post('/upgrade',{'current_password':'invalid'});assert status==403
     status,body,_=adminclient.post('/upgrade',{'current_password':fixture['admin_password']});assert status==200
     ok('completed setup is hidden, existing phone is read-only and upgrades require admin proof')
@@ -254,14 +262,14 @@ try:
     assert_status(content,'/api/v1/users',403)
     status,body,_=content.post('/legal/create',{'title':'forbidden','body':'forbidden'});assert status==403,(status,body);ok('content admin denied system-only API operations')
     evil='<script>alert(1)</script>'
-    status,body,_=site.post('/me/profile',{'first_name':evil,'last_name':'آزمون','province':'تهران','city':'تهران','gender':'male','phone':'09120009999','role':'system_admin','user_id':'ffffffffffffffffffffffffffffffff'});assert status==200,(status,body)
+    status,body,_=site.post('/me/profile',{'first_name':evil,'last_name':'آزمون','province':'تهران','city':'تهران','gender':'male','phone':sample_phone('contact2'),'role':'system_admin','user_id':'ffffffffffffffffffffffffffffffff'});assert status==200,(status,body)
     html=assert_status(site,'/account/profile',200);assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html and evil not in html
     status,body,_=site.request('/api/v1/me');assert json.loads(body)['user']['id']==fixture['user_id'];ok('profile ignores injected ownership/role and escapes stored HTML')
     for path in ['/bookings','/sessions/join','/sessions/archive','/oauth/google','/auth/eitaa']:
         status,body,_=site.post(path,{});assert status==503,(path,status,body)
     status,body,_=adminclient.post('/legal/recording/publish',{});assert status==503,(status,body)
     ok('booking media archive external auth and recording publication remain server-blocked')
-    status,body,_=site.post('/auth/otp/request',{'phone':'09124444444','purpose':'login'});assert status==503 and 'SMS_UNAVAILABLE' in body
+    status,body,_=site.post('/auth/otp/request',{'phone':sample_phone('contact3'),'purpose':'login'});assert status==503 and 'SMS_UNAVAILABLE' in body
     assert 'challenge_id' not in body;ok('disabled SMS cannot fake successful code delivery')
     for client in [site,adminclient]:
         for cookie in client.jar:
@@ -291,7 +299,7 @@ try:
     ok('content administrator can moderate content but cannot access system operations')
     for path in ['/api/v1/booking?id='+product['booking_id'],'/api/v1/session?id='+product['booking_id'],'/api/v1/ticket?id='+product['ticket_id']]:assert_status(site,path,404)
     assert_status(adminclient,'/api/v1/archive?id='+product['booking_id'],403)
-    status,body,_=site.post('/bookings/create',{'mentor_id':product['mentor_id']});assert status==503 and 'BOOKING_CLOSED' in body
+    status,body,_=site.post('/bookings/create',{'mentor_id':product['mentor_id']});assert status==400 and 'INVALID_INPUT' in body
     ok('ownership and explicit archive grants protect actual product HTTP routes')
     mentorclient=Client(cfg['origins']['site']);ownerclient=Client(cfg['origins']['site'])
     for client,phone,password in [(mentorclient,product['mentor_phone'],product['mentor_password']),(ownerclient,product['owner_phone'],product['owner_password'])]:
@@ -368,14 +376,16 @@ try:
     with adminclient.opener.open(request) as response:brand_id=json.loads(response.read())['asset_id']
     with guest.opener.open(guest.base+'/index.php?r=%2Fcontent%2Fasset&id='+brand_id) as response:assert response.read()==image_bytes
     status,body,_=content.post('/general/save',{'footer_logo_link':'/about'});assert status==403
-    status,body,_=adminclient.post('/general/save',{'about_text':'درباره مرشد','support_phone':'09120691542','support_email':'mozafarijavad287@gmail.com','support_address':'','footer_text':'<script>unsafe-footer</script>','footer_logo_link':'/about','enamad_link':''});assert status==200,(status,body)
-    html=assert_status(guest,'/',200);assert '09120691542' in html and 'mozafarijavad287@gmail.com' in html and '&lt;script&gt;unsafe-footer&lt;/script&gt;' in html and '<script>unsafe-footer</script>' not in html and brand_id in html
+    status,body,_=adminclient.post('/general/save',{'about_text':'درباره مرشد','support_phone':sample_phone('contact4'),'support_email':'support@example.test','support_address':'','footer_text':'<script>unsafe-footer</script>','footer_logo_link':'/about','enamad_link':''});assert status==200,(status,body)
+    html=assert_status(guest,'/',200);assert sample_phone('contact4') in html and 'support@example.test' in html and '&lt;script&gt;unsafe-footer&lt;/script&gt;' in html and '<script>unsafe-footer</script>' not in html and brand_id in html
     status,body,_=adminclient.post('/general/asset',{'kind':'footer_logo','remove':'1'});assert status==200
     assert_status(guest,'/api/v1/content/asset?id='+brand_id,404)
-    status,body,_=adminclient.post('/general/save',{'about_text':'درباره مرشد','support_phone':'09120691542','support_email':'mozafarijavad287@gmail.com','support_address':'','footer_text':'مرشد، جایی برای گفت‌وگو با صاحب تجربه.','footer_logo_link':'/','enamad_link':''});assert status==200
+    status,body,_=adminclient.post('/general/save',{'about_text':'درباره مرشد','support_phone':sample_phone('contact4'),'support_email':'support@example.test','support_address':'','footer_text':'مرشد، جایی برای گفت‌وگو با صاحب تجربه.','footer_logo_link':'/','enamad_link':''});assert status==200
     ok('admin branding upload publication removal and safe editable footer work with server role checks')
     subprocess.run([sys.executable,str(app/'tests/consultations_http14.py'),str(scratch)],check=True)
     subprocess.run([sys.executable,str(app/'tests/atlas_http15.py'),str(scratch)],check=True)
+    subprocess.run([sys.executable,str(app/'tests/account16_http.py'),str(scratch)],check=True)
+    subprocess.run([sys.executable,str(app/'tests/classification17_http.py'),str(scratch)],check=True)
     dumpbin=server.parent/('mariadb-dump.exe' if os.name=='nt' else 'mariadb-dump')
     if dumpbin.exists():
         dbname=cfg['database']['dsn'].split('dbname=')[1].split(';')[0];dumpfile=scratch/'private-test-backup.sql'
@@ -388,7 +398,7 @@ if($c['environment']!=='testing'||!preg_match('/dbname=(morshed_test_[a-f0-9]+);
 $original=new Morshed\Core\Database($c['database']);$copyConfig=$c['database'];$clone='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$clone.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($match[1],$clone,$copyConfig['dsn']);$restored=new Morshed\Core\Database($copyConfig);$restored->pdo->exec(file_get_contents($argv[2]));
 foreach($original->all('SHOW TABLES') as $row){$table=array_values($row)[0];if(!preg_match('/^m_[a-z_]+$/D',$table))throw new RuntimeException('Unexpected table');$keys=$original->all('SHOW KEYS FROM `'.$table.'` WHERE Key_name=\'PRIMARY\'');usort($keys,fn($a,$b)=>(int)$a['Seq_in_index']<=>(int)$b['Seq_in_index']);$order=implode(',',array_map(fn($k)=>'`'.$k['Column_name'].'`',$keys));$sql='SELECT * FROM `'.$table.'` ORDER BY '.$order;if($original->all($sql)!==$restored->all($sql))throw new RuntimeException('Restore mismatch '.$table);}
 $restored->run('UPDATE m_auth_sessions SET revoked_at=? WHERE revoked_at IS NULL',[time()]);$restored->run('UPDATE m_otp_challenges SET consumed_at=? WHERE consumed_at IS NULL',[time()]);$restored->run('UPDATE m_external_flows SET consumed_at=? WHERE consumed_at IS NULL',[time()]);if((int)$restored->run('SELECT COUNT(*) FROM m_auth_sessions WHERE revoked_at IS NULL')->fetchColumn()!==0)throw new RuntimeException('Restored sessions not invalidated');
-$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));(new Morshed\Product\Catalog($empty))->savedIds(str_repeat('0',32));(new Morshed\Product\Taxonomy($empty))->storage();(new Morshed\Product\ConsultationData($empty))->storage();(new Morshed\Product\Knowledge($empty))->storage();if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==7||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
+$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));(new Morshed\Product\Catalog($empty))->savedIds(str_repeat('0',32));(new Morshed\Product\Taxonomy($empty))->storage();(new Morshed\Product\ConsultationData($empty))->storage();(new Morshed\Product\Knowledge($empty))->storage();(new Morshed\Product\ContentAssets($empty,new Morshed\Core\Audit($empty)))->avatar(str_repeat('0',32));if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==7||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
 echo "PASS all database rows restored and old authentication invalidated\nPASS combined empty-database installer matches numbered migrations\n";
 ''',encoding='utf-8')
         r=subprocess.run(phpcmd+[str(restore),str(configphp),str(dumpfile),str(app)],capture_output=True,text=True,encoding='utf-8');assert r.returncode==0,r.stderr
