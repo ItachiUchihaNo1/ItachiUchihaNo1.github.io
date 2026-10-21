@@ -151,12 +151,12 @@ try:
     ok('incomplete account cannot use protected services before completing local credentials')
     status,body,_=guest.post('/account/saved/set',{'mentor_id':fixture['user_id'],'saved':'1'});assert status==401
     assert_status(site,'/api/v1/account/saved/set',419,{'mentor_id':fixture['user_id'],'saved':'1'})
-    html=assert_status(site,'/account/saved',200);assert 'نوع پسندها' in html and 'پسندها' in html
-    public=assert_status(guest,'/mentors',200);assert 'catalog-mentor' in public and 'data-mentor-save' not in public and 'ورود برای پسندیدن' in public
+    html=assert_status(site,'/account/saved',200);assert 'نوع ذخیره‌شده‌ها' in html and 'ذخیره‌شده‌ها' in html
+    public=assert_status(guest,'/mentors',200);assert 'catalog-mentor' in public and 'data-mentor-save' not in public and 'ورود برای ذخیرهٔ' in public
     public=assert_status(guest,'/experiences',200);assert 'catalog-experience' in public and 'بازدید' in public and 'خواندن تجربه' in public
     ok('saved lists require authentication and saves require CSRF while public cards remain readable')
     html=assert_status(guest,'/topics',200);assert 'موضوع‌های تجربه' in html and 'topic-tile' in html
-    html=assert_status(site,'/account/saved?tab=experiences',200);assert 'نوع پسندها' in html and 'aria-current="page"' in html
+    html=assert_status(site,'/account/saved?tab=experiences',200);assert 'نوع ذخیره‌شده‌ها' in html and 'aria-current="page"' in html
     ok('topics directory and both account-owned saved tabs render without exposing private experience fields')
 
 

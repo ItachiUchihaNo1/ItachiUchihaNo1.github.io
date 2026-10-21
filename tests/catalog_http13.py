@@ -10,7 +10,7 @@ assert post('/account/saved/set',{'kind':'experience','experience_id':experience
 html=get('/account/saved?tab=experiences');assert 'catalog-experience' in html and 'aria-pressed="true"' in html
 assert 'catalog-experience' not in get('/account/saved?tab=mentors')
 assert post('/account/saved/set',{'kind':'experience','experience_id':experience,'saved':'0'})['saved'] is False
-assert 'هنوز تجربه‌ای نپسندیده‌ای' in get('/account/saved?tab=experiences')
+assert 'هنوز تجربه‌ای ذخیره نکرده‌ای' in get('/account/saved?tab=experiences')
 topics=json.loads(get('/api/v1/topics'))['topics'];topic=next(t for t in topics if int(t['experience_count'])>0)
 html=get('/topic?id='+topic['id']);assert topic['title'] in html and 'catalog-experience' in html
 data=json.loads(get('/api/v1/experiences?topic='+topic['id']));assert all(row['topic_id']==topic['id'] for row in data['rows'])
