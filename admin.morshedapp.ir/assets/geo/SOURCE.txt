@@ -1,0 +1,6 @@
+{"source":"OpenStreetMap via hosseinhabibi2004/iran-geojson","retrieved":"2026-10-21","license":"ODbL-1.0 (upstream data); GPL-3.0 repository redistribution","official":false,"simplification_degrees":0.008}
+Map data © OpenStreetMap contributors, https://www.openstreetmap.org/copyright
+Boundaries are reference data, not an official statement.
+Source: https://github.com/hosseinhabibi2004/iran-geojson
+Pinned source revision: 890ff6c107c54d852328bbf7f9472d146c151ebf
+Derived by tools/build_atlas_geography.py; geometry simplified for display.

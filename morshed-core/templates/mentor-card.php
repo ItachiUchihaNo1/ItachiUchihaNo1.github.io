@@ -1,4 +1,4 @@
-<?php $profileUrl=$this->url('/mentor/profile?id='.$row['user_id']);$saved=in_array($row['user_id'],$savedMentors??[],true); ?>
+<?php $profileUrl=$this->url('/mentor/profile?id='.$row['user_id'].(isset($searchResultPosition)?'&via=search&position='.$searchResultPosition:''));$saved=in_array($row['user_id'],$savedMentors??[],true); ?>
 <article class="catalog-card catalog-mentor">
 <div class="catalog-person"><a class="catalog-avatar" href="<?= $this->h($profileUrl) ?>" aria-label="پروفایل <?= $this->h($row['display_name']) ?>"><?php if(!empty($row['avatar_asset_id'])): ?><img src="<?= $this->h($this->url('/content/asset?id='.$row['avatar_asset_id'])) ?>" width="64" height="64" loading="lazy" alt=""><?php else: ?><?= $this->icon('user') ?><?php endif; ?></a><div class="catalog-person-name"><span class="eyebrow">مرشد</span><h3><a href="<?= $this->h($profileUrl) ?>"><?= $this->h($row['display_name']) ?></a></h3><?php if(!empty($row['city'])): ?><span class="catalog-city"><?= $this->icon('pin') ?><?= $this->h($row['city']) ?></span><?php endif; ?></div>
 <?php $saveKind='mentor';$saveId=$row['user_id'];require __DIR__.'/save-button.php'; ?></div>

@@ -96,6 +96,7 @@ try:
     php_run('taxonomy13.php')
     php_run('consultations14.php')
     php_run('performance14.php')
+    php_run('atlas15.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')
     replies=race(fixture['booking_race']);assert any(x.get('code')=='SLOT_UNAVAILABLE' for x in replies);ok('two concurrent reservation requests cannot consume the same capacity')
@@ -374,6 +375,7 @@ try:
     status,body,_=adminclient.post('/general/save',{'about_text':'درباره مرشد','support_phone':'09120691542','support_email':'mozafarijavad287@gmail.com','support_address':'','footer_text':'مرشد، جایی برای گفت‌وگو با صاحب تجربه.','footer_logo_link':'/','enamad_link':''});assert status==200
     ok('admin branding upload publication removal and safe editable footer work with server role checks')
     subprocess.run([sys.executable,str(app/'tests/consultations_http14.py'),str(scratch)],check=True)
+    subprocess.run([sys.executable,str(app/'tests/atlas_http15.py'),str(scratch)],check=True)
     dumpbin=server.parent/('mariadb-dump.exe' if os.name=='nt' else 'mariadb-dump')
     if dumpbin.exists():
         dbname=cfg['database']['dsn'].split('dbname=')[1].split(';')[0];dumpfile=scratch/'private-test-backup.sql'
@@ -386,7 +388,7 @@ if($c['environment']!=='testing'||!preg_match('/dbname=(morshed_test_[a-f0-9]+);
 $original=new Morshed\Core\Database($c['database']);$copyConfig=$c['database'];$clone='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$clone.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($match[1],$clone,$copyConfig['dsn']);$restored=new Morshed\Core\Database($copyConfig);$restored->pdo->exec(file_get_contents($argv[2]));
 foreach($original->all('SHOW TABLES') as $row){$table=array_values($row)[0];if(!preg_match('/^m_[a-z_]+$/D',$table))throw new RuntimeException('Unexpected table');$keys=$original->all('SHOW KEYS FROM `'.$table.'` WHERE Key_name=\'PRIMARY\'');usort($keys,fn($a,$b)=>(int)$a['Seq_in_index']<=>(int)$b['Seq_in_index']);$order=implode(',',array_map(fn($k)=>'`'.$k['Column_name'].'`',$keys));$sql='SELECT * FROM `'.$table.'` ORDER BY '.$order;if($original->all($sql)!==$restored->all($sql))throw new RuntimeException('Restore mismatch '.$table);}
 $restored->run('UPDATE m_auth_sessions SET revoked_at=? WHERE revoked_at IS NULL',[time()]);$restored->run('UPDATE m_otp_challenges SET consumed_at=? WHERE consumed_at IS NULL',[time()]);$restored->run('UPDATE m_external_flows SET consumed_at=? WHERE consumed_at IS NULL',[time()]);if((int)$restored->run('SELECT COUNT(*) FROM m_auth_sessions WHERE revoked_at IS NULL')->fetchColumn()!==0)throw new RuntimeException('Restored sessions not invalidated');
-$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));(new Morshed\Product\Catalog($empty))->savedIds(str_repeat('0',32));(new Morshed\Product\Taxonomy($empty))->storage();(new Morshed\Product\ConsultationData($empty))->storage();if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==7||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
+$fresh='morshed_test_'.bin2hex(random_bytes(8));$original->pdo->exec('CREATE DATABASE `'.$fresh.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$copyConfig['dsn']=str_replace($clone,$fresh,$copyConfig['dsn']);$empty=new Morshed\Core\Database($copyConfig);$empty->pdo->exec(file_get_contents($argv[3].'/morshed-core/database/install-new-database.sql'));(new Morshed\Product\Catalog($empty))->savedIds(str_repeat('0',32));(new Morshed\Product\Taxonomy($empty))->storage();(new Morshed\Product\ConsultationData($empty))->storage();(new Morshed\Product\Knowledge($empty))->storage();if((int)$empty->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn()!==7||count($empty->all('SHOW TABLES'))!==count($original->all('SHOW TABLES')))throw new RuntimeException('Combined installer mismatch');
 echo "PASS all database rows restored and old authentication invalidated\nPASS combined empty-database installer matches numbered migrations\n";
 ''',encoding='utf-8')
         r=subprocess.run(phpcmd+[str(restore),str(configphp),str(dumpfile),str(app)],capture_output=True,text=True,encoding='utf-8');assert r.returncode==0,r.stderr
