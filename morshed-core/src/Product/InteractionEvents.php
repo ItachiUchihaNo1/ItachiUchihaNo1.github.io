@@ -34,8 +34,13 @@ final class InteractionEvents
     public function configure(array $a,bool $enabled,?int $days,bool $approved):void
     {
         (new Policy($this->db))->admin($a,true);(new Knowledge($this->db))->storage();
-        if($enabled&&(!$approved||$days===null||$days<1||$days>3650)){throw new Problem('POLICY_REQUIRED','فعال‌سازی به تأیید سیاست نگهداری و تعیین مدت نیاز دارد.');}
-        $this->db->tx(function()use($a,$enabled,$days,$approved){$this->db->run('UPDATE m_interaction_policy SET enabled=?,retention_days=?,approved_by=?,approved_at=? WHERE id=1',[$enabled?1:0,$days,$approved?$a['user_id']:null,$approved?time():null]);(new \Morshed\Core\Audit($this->db))->add($a['user_id'],'admin','interaction.policy_changed','1');});
+        if(($enabled||$approved)&&(!$approved||$days===null||$days<1||$days>3650)){throw new Problem('POLICY_REQUIRED','فعال‌سازی به تأیید سیاست نگهداری و تعیین مدت نیاز دارد.');}
+        $this->db->tx(function()use($a,$enabled,$days,$approved){
+            $previous=$this->db->one('SELECT retention_days,approved_by,approved_at FROM m_interaction_policy WHERE id=1 FOR UPDATE');
+            // Disabling collection does not revoke the retention promise for already-collected records.
+            $retention=$approved?$days:($previous['retention_days']??null);$reviewer=$approved?$a['user_id']:($previous['approved_by']??null);$reviewedAt=$approved?time():($previous['approved_at']??null);
+            $this->db->run('UPDATE m_interaction_policy SET enabled=?,retention_days=?,approved_by=?,approved_at=? WHERE id=1',[$enabled?1:0,$retention,$reviewer,$reviewedAt]);(new \Morshed\Core\Audit($this->db))->add($a['user_id'],'admin','interaction.policy_changed','1');
+        });
     }
     public function purge():int
     {
