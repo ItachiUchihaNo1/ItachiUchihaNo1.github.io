@@ -43,17 +43,18 @@ final class AtlasData
     }
     public function saveOrganization(array $a,array $d):string
     {
-        (new Policy($this->db))->admin($a,true);$this->storage();
+        (new Policy($this->db))->admin($a,true);$this->storage();$four=new Classifications($this->db);$four->storage();
         return $this->db->tx(function()use($a,$d){
             $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');
             $id=($d['id']??'')?:Security::id();if(!Security::validId($id)){throw new Problem('INVALID_INPUT','شناسه معتبر نیست.');}
             $old=$this->db->one('SELECT o.*,p.* FROM m_organizations o LEFT JOIN m_organization_profiles p ON p.org_id=o.id WHERE o.id=?',[$id]);
             if(!empty($old['merged_into'])){throw new Problem('MERGED','این مجموعه ادغام شده است.',409);}
             [$province,$county]=$this->location($d['province_id']??'',$d['county_id']??'');
-            $name=preg_replace('/\s+/u',' ',str_replace(['ي','ك'],['ی','ک'],Policy::text($d['name']??'',180)));$type=Policy::choice($d['org_type']??'other',['heyat','charity','cultural','business','other']);$description=Policy::text($d['description']??'',6000,0);$active=Policy::integer($d['active']??1,0,1);$verified=($d['verified']??'')==='1'?time():null;
+            $name=preg_replace('/\s+/u',' ',str_replace(['ي','ك'],['ی','ک'],Policy::text($d['name']??'',180)));$type=Policy::text($d['org_type']??'other',24);if(!$this->db->one('SELECT id FROM m_org_types WHERE id=? AND (active=1 OR id=?)',[$type,$old['org_type']??''])){throw new Problem('INVALID_ORGANIZATION','نوع مجموعه معتبر نیست.');}$description=Policy::text($d['description']??'',6000,0);$active=Policy::integer($d['active']??1,0,1);$verified=($d['verified']??'')==='1'?time():null;
             if($this->db->one('SELECT o.id FROM m_organizations o JOIN m_organization_profiles p ON p.org_id=o.id WHERE o.id<>? AND o.name=? AND p.org_type=? AND p.province_id<=>? AND p.county_id<=>? AND p.merged_into IS NULL',[$id,$name,$type,$province,$county])){throw new Problem('DUPLICATE_ORGANIZATION','این نام و نوع در همین مکان ثبت شده است؛ مجموعه موجود را انتخاب کنید.',409);}
             if($old){$this->db->run('UPDATE m_organizations SET name=?,active=? WHERE id=?',[$name,$active,$id]);}else{$this->db->run('INSERT INTO m_organizations(id,name,active) VALUES(?,?,?)',[$id,$name,$active]);}
             $this->db->run('INSERT INTO m_organization_profiles(org_id,description,org_type,province_id,county_id,verified_at,verified_by,updated_at) VALUES(?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE description=VALUES(description),org_type=VALUES(org_type),province_id=VALUES(province_id),county_id=VALUES(county_id),verified_at=VALUES(verified_at),verified_by=VALUES(verified_by),updated_at=VALUES(updated_at)',[$id,$description,$type,$province,$county,$verified,$verified?$a['user_id']:null,time()]);
+            $this->db->run('INSERT INTO m_organization_type_links VALUES(?,?) ON DUPLICATE KEY UPDATE type_id=VALUES(type_id)',[$id,$type]);
             $aliases=Policy::text($d['aliases']??'',1600,0);$this->db->run('DELETE FROM m_organization_aliases WHERE org_id=?',[$id]);foreach(array_unique(array_filter(array_map('trim',explode("\n",$aliases)))) as $alias){$this->db->run('INSERT INTO m_organization_aliases(org_id,alias) VALUES(?,?)',[$id,Policy::text($alias,180)]);}
             $this->change($a,$id,'organization.saved',$old,['name'=>$name,'type'=>$type,'province'=>$province,'county'=>$county,'verified'=>$verified,'active'=>$active]);return $id;
         });
@@ -80,7 +81,7 @@ final class AtlasData
         $this->db->run('INSERT INTO m_experience_places(version_id,province_id,county_id,location_type,is_primary,status,reviewed_by,reviewed_at,place_key) SELECT ?,province_id,county_id,location_type,is_primary,status,reviewed_by,reviewed_at,place_key FROM m_experience_places WHERE version_id=?',[$version,$previous]);
     }
     public function versionData(string $version):array
-    {$this->storage();return ['organizations'=>$this->db->all('SELECT x.*,o.name FROM m_experience_organizations x JOIN m_organizations o ON o.id=x.org_id WHERE x.version_id=?',[$version]),'places'=>$this->db->all('SELECT x.*,p.name AS province_name,c.name AS county_name FROM m_experience_places x JOIN m_places p ON p.id=x.province_id LEFT JOIN m_places c ON c.id=x.county_id WHERE x.version_id=?',[$version])];}
+    {$this->storage();(new Classifications($this->db))->storage();return ['organizations'=>$this->db->all('SELECT x.*,o.name FROM m_experience_organizations x JOIN m_organizations o ON o.id=x.org_id WHERE x.version_id=?',[$version]),'places'=>$this->db->all('SELECT x.*,p.name AS province_name,c.name AS county_name FROM m_experience_places x JOIN m_places p ON p.id=x.province_id LEFT JOIN m_places c ON c.id=x.county_id WHERE x.version_id=?',[$version])];}
     public function attribution(array $a,array $d):void
     {
         (new Policy($this->db))->admin($a);$this->storage();
@@ -108,20 +109,15 @@ final class AtlasData
     private function filters(array $d,array &$args):string
     {
         $where='1=1';
-        foreach(['topic','issue'] as $kind){
-            $values=$d[$kind]??[];if(is_string($values)){$values=$values===''?[]:[$values];}
-            if(!is_array($values)||count($values)>20){throw new Problem('INVALID_FILTER','حداکثر بیست فیلتر انتخاب کنید.');}
-            $ids=[];foreach($values as $id){if(!is_string($id)||!Security::validId($id)){throw new Problem('INVALID_FILTER','فیلتر معتبر نیست.');}$ids[]=(new Taxonomy($this->db))->resolve($id);}
-            if($ids){$where.=" AND EXISTS(SELECT 1 FROM m_terms ft WHERE ft.kind='$kind' AND ft.id IN (".implode(',',array_fill(0,count($ids),'?')).') AND '.Taxonomy::condition().')';array_push($args,...$ids);}
-        }
+        $where.=(new DiscoveryFilters($this->db))->sql($d,$args);
         $q=Policy::text($d['q']??'',160,0);if($q!==''){$pattern=Policy::query($q);$where.=" AND (v.title LIKE ? OR v.body LIKE ? OR u.display_name LIKE ? OR EXISTS(SELECT 1 FROM m_experience_organizations sq JOIN m_organizations so ON so.id=sq.org_id LEFT JOIN m_organization_profiles sp ON sp.org_id=so.id LEFT JOIN m_organization_aliases sa ON sa.org_id=COALESCE(sp.merged_into,so.id) WHERE sq.version_id=v.id AND sq.status='approved' AND (so.name LIKE ? OR sa.alias LIKE ?)) OR EXISTS(SELECT 1 FROM m_terms ft LEFT JOIN m_term_aliases fa ON fa.term_id=ft.id WHERE ".Taxonomy::condition()." AND (REPLACE(REPLACE(REPLACE(ft.title,'ي','ی'),'ك','ک'),'‌',' ') LIKE ? OR REPLACE(REPLACE(REPLACE(fa.alias,'ي','ی'),'ك','ک'),'‌',' ') LIKE ?)))";array_push($args,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern);}
         if(!empty($d['mentor_id'])){if(!is_string($d['mentor_id'])||!Security::validId($d['mentor_id'])){throw new Problem('INVALID_FILTER','مرشد معتبر نیست.');}$where.=' AND e.mentor_id=?';$args[]=$d['mentor_id'];}
-        if(!empty($d['organization_id'])){if(!is_string($d['organization_id'])||!Security::validId($d['organization_id'])){throw new Problem('INVALID_FILTER','مجموعه معتبر نیست.');}$where.=" AND EXISTS(SELECT 1 FROM m_experience_organizations fx JOIN m_organization_profiles fp ON fp.org_id=fx.org_id WHERE fx.version_id=v.id AND fx.status='approved' AND COALESCE(fp.merged_into,fx.org_id)=?)";$args[]=$d['organization_id'];}
+        if($q!==''){$where=str_replace('v.title LIKE ?', '(v.title LIKE ? OR '.(new DiscoveryFilters($this->db))->textSql().')',$where);$prefixCount=count($args)-7-(!empty($d['mentor_id'])?1:0);array_splice($args,$prefixCount+1,0,[$pattern,$pattern]);}
         return $where;
     }
     public function discover(array $d=[],bool $geographic=false):array
     {
-        $this->storage();(new Taxonomy($this->db))->storage();
+        $this->storage();(new Classifications($this->db))->storage();
         $layer=Policy::choice($d['layer']??'experiences',['experiences','organizations','mentors']);$page=Policy::integer($d['page']??1,1,10000);
         [$province,$county]=$this->location($d['province']??'',$d['county']??'');$args=[];$where=$this->filters($d,$args);$base=self::publicBase();
         if($layer==='organizations'){
@@ -154,7 +150,7 @@ final class AtlasData
     }
     public function organization(string $id,array $pages=[]):array
     {
-        $this->storage();$o=$this->db->one('SELECT o.id,o.name,p.description,p.org_type,p.province_id,p.county_id,p.merged_into,pr.name AS province_name,co.name AS county_name FROM m_organizations o JOIN m_organization_profiles p ON p.org_id=o.id LEFT JOIN m_places pr ON pr.id=p.province_id LEFT JOIN m_places co ON co.id=p.county_id WHERE o.id=? AND (o.active=1 OR p.merged_into IS NOT NULL) AND p.verified_at IS NOT NULL',[$id]);
+        $this->storage();(new Classifications($this->db))->storage();$o=$this->db->one('SELECT o.id,o.name,p.description,p.org_type,ot.title AS type_title,p.province_id,p.county_id,p.merged_into,pr.name AS province_name,co.name AS county_name FROM m_organizations o JOIN m_organization_profiles p ON p.org_id=o.id LEFT JOIN m_places pr ON pr.id=p.province_id LEFT JOIN m_places co ON co.id=p.county_id LEFT JOIN m_org_types ot ON ot.id=p.org_type WHERE o.id=? AND (o.active=1 OR p.merged_into IS NOT NULL) AND p.verified_at IS NOT NULL',[$id]);
         if(!$o){throw new Problem('NOT_FOUND','مجموعهٔ عمومی پیدا نشد.',404);}if($o['merged_into']){return $this->organization($o['merged_into'],$pages);}
         $experiences=$this->discover(['organization_id'=>$o['id'],'page'=>$pages['page']??1]);if(!$experiences['total']){throw new Problem('NOT_FOUND','مجموعهٔ دارای تجربهٔ منتشرشده پیدا نشد.',404);}
         $classifications=$this->db->all("SELECT ft.id,ft.kind,ft.title FROM m_terms ft WHERE ft.active=1 AND EXISTS(SELECT 1".self::publicBase()." JOIN m_experience_organizations cx ON cx.version_id=v.id AND cx.status='approved' JOIN m_organization_profiles cp ON cp.org_id=cx.org_id WHERE COALESCE(cp.merged_into,cx.org_id)=? AND ".Taxonomy::condition().') ORDER BY ft.kind,ft.title',[$o['id']]);
@@ -162,7 +158,7 @@ final class AtlasData
     }
     public function publicLinks(string $version):array
     {
-        $this->storage();return ['organizations'=>$this->db->all("SELECT DISTINCT o.id,o.name,x.relation_type FROM m_experience_organizations x JOIN m_organization_profiles source ON source.org_id=x.org_id JOIN m_organizations o ON o.id=COALESCE(source.merged_into,x.org_id) AND o.active=1 JOIN m_organization_profiles p ON p.org_id=o.id AND p.verified_at IS NOT NULL AND p.merged_into IS NULL WHERE x.version_id=? AND x.status='approved'",[$version]),'places'=>$this->db->all("SELECT DISTINCT x.province_id,x.county_id,p.name AS province_name,c.name AS county_name FROM m_experience_places x JOIN m_places p ON p.id=x.province_id LEFT JOIN m_places c ON c.id=x.county_id WHERE x.version_id=? AND x.status='approved'",[$version])];
+        $this->storage();(new Classifications($this->db))->storage();return ['organizations'=>$this->db->all("SELECT DISTINCT o.id,o.name,x.relation_type,p.org_type,ot.title AS type_title FROM m_experience_organizations x JOIN m_organization_profiles source ON source.org_id=x.org_id JOIN m_organizations o ON o.id=COALESCE(source.merged_into,x.org_id) AND o.active=1 JOIN m_organization_profiles p ON p.org_id=o.id AND p.verified_at IS NOT NULL AND p.merged_into IS NULL LEFT JOIN m_org_types ot ON ot.id=p.org_type WHERE x.version_id=? AND x.status='approved'",[$version]),'places'=>$this->db->all("SELECT DISTINCT x.province_id,x.county_id,p.name AS province_name,c.name AS county_name FROM m_experience_places x JOIN m_places p ON p.id=x.province_id LEFT JOIN m_places c ON c.id=x.county_id WHERE x.version_id=? AND x.status='approved'",[$version])];
     }
     public function mentorOrganizations(string $mentor):array
     {

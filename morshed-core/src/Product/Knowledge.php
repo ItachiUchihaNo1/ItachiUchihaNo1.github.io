@@ -6,7 +6,7 @@ use Morshed\Core\{Database,Problem,Security,Audit};
 /** Stores only new semantic assertions. Existing ownership/taxonomy/booking edges remain projections. */
 final class Knowledge
 {
-    public const TYPES=['MENTOR','EXPERIENCE','ISSUE','TOPIC','ORGANIZATION','USER','CONSULTATION_REQUEST','SESSION','PLACE'];
+    public const TYPES=['PROBLEM','AUDIENCE','ORGANIZATION_TYPE','MENTOR','EXPERIENCE','ISSUE','TOPIC','ORGANIZATION','USER','CONSULTATION_REQUEST','SESSION','PLACE'];
     public const RELATIONS=[
         'ISSUE_IN_TOPIC'=>['ISSUE','TOPIC',false,false],
         'TOPIC_PARENT_OF'=>['TOPIC','TOPIC',false,true],
@@ -18,7 +18,7 @@ final class Knowledge
     public function storage():void
     {
         if($this->db->featureReady('knowledge15')){return;}
-        (new AtlasData($this->db))->storage();(new Taxonomy($this->db))->storage();
+        (new Classifications($this->db))->storage();(new AtlasData($this->db))->storage();(new Taxonomy($this->db))->storage();
         try{$this->db->run('SELECT id FROM m_interaction_policy LIMIT 0');}
         catch(\PDOException $e){if((int)($e->errorInfo[1]??0)!==1146){throw $e;}if($this->db->pdo->inTransaction()){throw new \LogicException('Prepare knowledge storage before transaction.');}foreach(explode(';',file_get_contents(__DIR__.'/../../database/knowledge15.sql')) as $sql){if(trim($sql)!==''){$this->db->run($sql);}}}
         $this->db->markFeatureReady('knowledge15');
@@ -29,6 +29,9 @@ final class Knowledge
         if(in_array($type,['ISSUE','TOPIC'],true)){$id=(new Taxonomy($this->db))->resolve($id);}
         if($public&&in_array($type,['USER','CONSULTATION_REQUEST','SESSION'],true)){return false;}
         return match($type){
+            'AUDIENCE'=>(bool)$this->db->one('SELECT id FROM m_audiences WHERE id=?'.($public?' AND active=1':''),[$id]),
+            'ORGANIZATION_TYPE'=>(bool)$this->db->one('SELECT id FROM m_org_types WHERE id=?'.($public?' AND active=1':''),[$id]),
+            'PROBLEM'=>$this->problemEntity($id,$public),
             'MENTOR'=>(bool)$this->db->one("SELECT m.user_id FROM m_mentors m JOIN m_users u ON u.id=m.user_id WHERE m.user_id=?".($public?" AND m.status='active' AND u.status='active'":''),[$id]),
             'EXPERIENCE'=>(bool)$this->db->one($public?'SELECT e.id'.AtlasData::publicBase().' WHERE e.id=?':'SELECT id FROM m_experiences WHERE id=?',[$id]),
             'ISSUE','TOPIC'=>(bool)$this->db->one('SELECT id FROM m_terms WHERE id=? AND kind=? AND active=1',[$id,strtolower($type)]),
@@ -38,6 +41,11 @@ final class Knowledge
             'CONSULTATION_REQUEST','SESSION'=>(bool)$this->db->one('SELECT id FROM m_bookings WHERE id=?',[$id]),
             default=>false,
         };
+    }
+    private function problemEntity(string $id,bool $public):bool
+    {
+        if(!preg_match('/^([a-f0-9]{32}):([a-f0-9]{32})$/D',$id,$parts)){return false;}
+        return (bool)$this->db->one('SELECT p.id FROM m_experience_problems p'.($public?' JOIN m_experiences e ON e.public_version_id=p.version_id JOIN m_mentors m ON m.user_id=e.mentor_id AND m.status=\'active\' JOIN m_users u ON u.id=m.user_id AND u.status=\'active\'':'').' WHERE p.version_id=? AND p.id=?',[$parts[1],$parts[2]]);
     }
     private function publicOrganization(string $id):bool
     {try{return (new AtlasData($this->db))->organization($id)['organization']['id']===$id;}catch(Problem $e){if($e->status!==404){throw $e;}return false;}}
@@ -118,8 +126,11 @@ final class Knowledge
         $this->storage();if(!$this->entity('EXPERIENCE',$experience,true)){return [];}
         $e=$this->db->one('SELECT mentor_id,public_version_id FROM m_experiences WHERE id=?',[$experience]);$out=[['type'=>'MENTOR_OWNS_EXPERIENCE','from'=>$e['mentor_id'],'to'=>$experience,'origin'=>'system','visibility'=>'public']];
         $labels=(new Taxonomy($this->db))->labels([$e['public_version_id']])[$e['public_version_id']]??[];
-        foreach(['topics'=>'EXPERIENCE_ABOUT_TOPIC','issues'=>'EXPERIENCE_ADDRESSES_ISSUE'] as $key=>$type){foreach($labels[$key]??[] as $term){$out[]=['type'=>$type,'from'=>$experience,'to'=>$term['id'],'origin'=>'system','visibility'=>'public'];}}
-        $links=(new AtlasData($this->db))->publicLinks($e['public_version_id']);foreach($links['organizations'] as $org){$out[]=['type'=>'EXPERIENCE_OCCURRED_AT_ORGANIZATION','from'=>$experience,'to'=>$org['id'],'attribution'=>$org['relation_type'],'origin'=>'admin','visibility'=>'public'];}
+        foreach(['topics'=>'EXPERIENCE_ABOUT_TOPIC','issues'=>'EXPERIENCE_TAGGED_WITH_ISSUE'] as $key=>$type){foreach($labels[$key]??[] as $term){$out[]=['type'=>$type,'from'=>$experience,'to'=>$term['id'],'origin'=>'system','visibility'=>'public'];}}
+        $facts=(new Classifications($this->db))->version($e['public_version_id']);
+        foreach($facts['problems'] as $problem){$ref=$e['public_version_id'].':'.$problem['id'];$out[]=['type'=>'EXPERIENCE_HAS_PROBLEM','from'=>$experience,'to'=>$ref,'origin'=>'system','visibility'=>'public'];foreach($problem['tags'] as $tag){if($tag['active']){$out[]=['type'=>'PROBLEM_HAS_ISSUE_TAG','from'=>$ref,'to'=>$tag['id'],'origin'=>'system','visibility'=>'public'];}}}
+        foreach($facts['audiences'] as $audience){if($audience['active']){$out[]=['type'=>'EXPERIENCE_FOR_AUDIENCE','from'=>$experience,'to'=>$audience['id'],'origin'=>'system','visibility'=>'public'];}}
+        $links=(new AtlasData($this->db))->publicLinks($e['public_version_id']);foreach($links['organizations'] as $org){if(!empty($org['org_type'])){$out[]=['type'=>'ORGANIZATION_OF_TYPE','from'=>$org['id'],'to'=>$org['org_type'],'origin'=>'admin','visibility'=>'public'];}$out[]=['type'=>'EXPERIENCE_OCCURRED_AT_ORGANIZATION','from'=>$experience,'to'=>$org['id'],'attribution'=>$org['relation_type'],'origin'=>'admin','visibility'=>'public'];}
         foreach($links['places'] as $place){$out[]=['type'=>'EXPERIENCE_OCCURRED_IN_PLACE','from'=>$experience,'to'=>$place['county_id']??$place['province_id'],'origin'=>'admin','visibility'=>'public'];}
         return $out;
     }

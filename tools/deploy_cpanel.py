@@ -10,7 +10,7 @@ ALLOWED_EXT={'.php','.css','.js','.png','.webp','.woff2','.txt'}
 
 def allowed(name):
     if name=='morshed-core/database/migrations/007_profiles_and_experience_cases.sql':return True
-    if name in {'morshed-core/database/taxonomy17.sql','morshed-core/database/atlas15.sql','morshed-core/database/knowledge15.sql','morshed-core/data/iran-places.json'}:return True
+    if name in {'morshed-core/database/classification20.sql','morshed-core/database/taxonomy17.sql','morshed-core/database/atlas15.sql','morshed-core/database/knowledge15.sql','morshed-core/data/iran-places.json'}:return True
     if re.fullmatch(r'(morshedapp\.ir|admin\.morshedapp\.ir)/assets/geo/(provinces|osm-[0-9]+)\.json',name):return True
     p=PurePosixPath(name)
     return (not p.is_absolute() and len(p.parts)>1 and p.parts[0] in ALLOWED_ROOTS

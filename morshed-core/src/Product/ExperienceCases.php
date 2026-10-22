@@ -27,8 +27,8 @@ final class ExperienceCases
     public function save(array $a,array $input):array
     {
         if(!Upgrade::ready($this->db)){throw new Problem('UPGRADE_REQUIRED','ابتدا به‌روزرسانی دیتابیس لازم است.',503);}
-        $taxonomy=new Taxonomy($this->db);$taxonomy->storage();$atlas=new AtlasData($this->db);$atlas->storage();
-        return $this->db->tx(function()use($a,$input,$taxonomy,$atlas){
+        $four=new Classifications($this->db);$four->storage();$taxonomy=new Taxonomy($this->db);$taxonomy->storage();$atlas=new AtlasData($this->db);$atlas->storage();
+        return $this->db->tx(function()use($a,$input,$taxonomy,$atlas,$four){
             $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$policy=new Policy($this->db);$admin=($a['realm']??'')==='admin';
             if($admin){$policy->admin($a);}else{$m=$policy->mentor($a);if(!$m['accepted_at']){throw new Problem('INVITE_NOT_ACCEPTED','دعوت باید پذیرفته شود.',409);}}
             $eid=($input['experience_id']??'')?:Security::id();$e=$this->db->one('SELECT * FROM m_experiences WHERE id=? FOR UPDATE',[$eid]);
@@ -37,9 +37,10 @@ final class ExperienceCases
             if(!$this->db->one("SELECT m.user_id FROM m_mentors m JOIN m_users u ON u.id=m.user_id WHERE m.user_id=? AND m.status='active' AND u.status='active'",[$mentor])){throw new Problem('INVALID_MENTOR','مرشد را از پرونده‌های مرشد انتخاب کنید.');}
             $latest=$this->db->one('SELECT * FROM m_experience_versions WHERE experience_id=? ORDER BY version_no DESC LIMIT 1 FOR UPDATE',[$eid]);
             if(($input['base_version_id']??'')!==($latest['id']??'')){throw new Problem('STALE_VERSION','نسخه تغییر کرده است؛ صفحه را دوباره باز کنید.',409);}
-            $title=self::field($input['title']??'','عنوان تجربه',180,1);$term=($input['term_id']??'')?:null;if($term&&!$this->db->one('SELECT id FROM m_terms WHERE id=? AND active=1',[$term])){throw new Problem('INVALID_TOPIC','موضوع معتبر نیست.');}
-            $d=[];foreach([...self::PUBLIC_FIELDS,...self::PRIVATE_FIELDS] as $k){$labels=['summary'=>'خلاصه و شناسنامه','role'=>'نقش مرشد','activity_area'=>'حوزه فعالیت','period'=>'زمان اجرا','setting'=>'بستر اجرا','source_text'=>'متن خام مصاحبه'];$d[$k]=self::field($input[$k]??'',$labels[$k]??(self::NARRATIVE[$k]??$k),$k==='source_text'?30000:10000);}
-            $d['outcome']=Policy::choice($input['outcome']??'unknown',['success','failure','mixed','unknown']);$d['visibility']=Policy::choice($input['visibility']??'private',['private','public']);$d['method']='manual';
+            $previousDetails=$latest?$this->details($latest['id']):[];
+            $title=self::field($input['title']??$latest['title']??'','عنوان تجربه',180,1);$term=($input['term_id']??$latest['term_id']??'')?:null;if($term&&!$this->db->one('SELECT id FROM m_terms WHERE id=? AND (active=1 OR id=?)',[$term,$latest['term_id']??''])){throw new Problem('INVALID_TOPIC','موضوع معتبر نیست.');}
+            $d=[];foreach([...self::PUBLIC_FIELDS,...self::PRIVATE_FIELDS] as $k){$labels=['summary'=>'خلاصه و شناسنامه','role'=>'نقش مرشد','activity_area'=>'حوزه فعالیت','period'=>'زمان اجرا','setting'=>'بستر اجرا','source_text'=>'متن خام مصاحبه'];$d[$k]=self::field($input[$k]??$previousDetails[$k]??'',$labels[$k]??(self::NARRATIVE[$k]??$k),$k==='source_text'?30000:10000);}
+            $d['outcome']=Policy::choice($input['outcome']??$previousDetails['outcome']??'unknown',['success','failure','mixed','unknown']);$d['visibility']=Policy::choice($input['visibility']??$previousDetails['visibility']??'private',['private','public']);$d['method']='manual';
             $required=array_filter(['problem','context','actions','results','lessons'],fn($k)=>$d[$k]==='');$d['quality_level']=$required?'incomplete':(($d['claim_sources']!==''&&$d['challenges']!==''&&$d['decisions']!=='')?'rich':'ready');
             $d['owner_approved_at']=(!$admin&&($input['owner_approve']??'')==='1')?time():null;$d['updated_by']=$a['user_id'];$d['updated_at']=time();
             $body=$d['summary']."\n".$d['problem_statement']."\n".$d['synonyms']."\n".$d['target_audience']."\n".$d['applicability']."\n".implode("\n\n",array_map(fn($k)=>self::NARRATIVE[$k]."\n".$d[$k],array_keys(self::NARRATIVE)));
@@ -48,7 +49,7 @@ final class ExperienceCases
             // Reviewed, submitted and public versions are immutable; edits start a new revision.
             $id=Security::id();
             {$this->db->run('INSERT INTO m_experience_versions(id,experience_id,version_no,title,body,term_id,review_note,created_at) VALUES(?,?,?,?,?,?,?,?)',[$id,$eid,($latest?(int)$latest['version_no']:0)+1,$title,$body,$term,'',time()]);}
-            $taxonomy->assign($id,$input,$latest['id']??null);$atlas->cloneVersion($id,$latest['id']??null);
+            $taxonomy->assign($id,$input,$latest['id']??null);$atlas->cloneVersion($id,$latest['id']??null);$four->assign($id,$latest['id']??null,$input,$a);
             $columns=array_keys($d);$this->db->run('INSERT INTO m_experience_details(version_id,'.implode(',',$columns).') VALUES('.implode(',',array_fill(0,count($columns)+1,'?')).') ON DUPLICATE KEY UPDATE '.implode(',',array_map(fn($k)=>$k.'=VALUES('.$k.')',$columns)),[$id,...array_values($d)]);
             $assets=$input['asset_ids']??($latest?array_column($this->db->all('SELECT asset_id FROM m_experience_assets WHERE version_id=?',[$latest['id']]),'asset_id'):[]);if(!is_array($assets)||count($assets)>5){throw new Problem('INVALID_FILE','حداکثر پنج مستند مجاز است.');}foreach($assets as $asset){if(!is_string($asset)||!$this->db->one('SELECT id FROM m_content_assets WHERE id=? AND owner_id=?',[$asset,$mentor])){throw new Problem('ACCESS_DENIED','مستند متعلق به مرشد نیست.',403);}}$this->db->run('DELETE FROM m_experience_assets WHERE version_id=?',[$id]);foreach(array_unique($assets) as $asset){$this->db->run('INSERT INTO m_experience_assets VALUES(?,?)',[$id,$asset]);}$this->audit->add($a['user_id'],$admin?'admin':'site','experience.structured_saved',$id);return ['id'=>$id,'experience_id'=>$eid];
         });
@@ -66,7 +67,8 @@ final class ExperienceCases
     }
     public function listing(array $d):array
     {
-        $q=Policy::query($d['q']??'');$where='(v.title LIKE ? OR v.body LIKE ? OR u.display_name LIKE ?)';$args=[$q,$q,$q];
+        (new Classifications($this->db))->storage();$q=Policy::query($d['q']??'');$where='(v.title LIKE ? OR v.body LIKE ? OR u.display_name LIKE ?)';$args=[$q,$q,$q];
+        $where.=(new DiscoveryFilters($this->db))->sql($d,$args);
         foreach(['status'=>'v.status','mentor_id'=>'e.mentor_id','term_id'=>'v.term_id'] as $key=>$column){if(!empty($d[$key])){$where.=' AND '.$column.'=?';$args[]=Policy::text($d[$key],32);}}
         foreach(['from'=>'>=','to'=>'<='] as $key=>$op){if(!empty($d[$key])){$date=Policy::text($d[$key],10);$time=strtotime($date.' UTC');if(!$time){throw new Problem('INVALID_INPUT','تاریخ معتبر نیست.');}$where.=' AND v.created_at'.$op.'?';$args[]=$time+($key==='to'?86399:0);}}
         if(Upgrade::ready($this->db)){foreach(['method','outcome','target_audience'] as $key){if(!empty($d[$key])){$where.=' AND x.'.$key.($key==='target_audience'?' LIKE ?':'=?');$args[]=$key==='target_audience'?Policy::query($d[$key]):Policy::text($d[$key],40);}}$join=' LEFT JOIN m_experience_details x ON x.version_id=v.id';$fields=',x.quality_level,x.method,x.updated_at';}else{$join='';$fields='';}

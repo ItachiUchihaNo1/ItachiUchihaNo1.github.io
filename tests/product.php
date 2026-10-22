@@ -20,7 +20,7 @@ check('invited mentor is not publicly visible',fn()=>eq(count($c->mentors()),0))
 
 check('invitation requires acceptance of current base terms',fn()=>rejects('TERMS_REQUIRED',fn()=>$c->acceptInvite($mentor)));
 $v=$legal->current();$legal->accept($mentor['user_id'],$v['id']);$c->acceptInvite($mentor);$c->mentorProfile($mentor,['headline'=>'آموزگار باتجربه','bio'=>'روش عملی مدیریت کلاس','terms'=>[$topic,$issue]]);$c->mentorState($aa,$mentor['user_id'],'active');
-check('mentor query combines Persian normalization and topic filter',fn()=>eq($c->mentors(['q'=>'كلاس','term'=>$topic])[0]['user_id'],$mentor['user_id']));
+check('profile-only topic claim does not match a mentor without a published experience',fn()=>eq($c->mentorTotal(['q'=>'كلاس','term'=>$topic]),0));
 $draft=$c->saveExperience($mentor,['title'=>'نخستین تجربه','body'=>'مسئله، اقدام و نتیجه واقعی','term_id'=>$issue]);$eid=$draft['experience_id'];
 check('draft experience cannot be read publicly',fn()=>rejects('NOT_FOUND',fn()=>$c->experience($eid)));
 check('another mentor cannot edit experience by changing ID',fn()=>rejects('MENTOR_REQUIRED',fn()=>$c->saveExperience($stranger,['experience_id'=>$eid,'title'=>'تصاحب','body'=>'تصاحب'])));

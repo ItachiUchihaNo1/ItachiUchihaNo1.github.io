@@ -13,9 +13,9 @@ root=admin.post('/taxonomy/save',{'kind':'topic','title':'HTTP17 '+secrets.token
 child=admin.post('/taxonomy/save',{'kind':'topic','title':'Child17 '+secrets.token_hex(6),'parent_id':root})['id']
 issue=admin.post('/taxonomy/save',{'kind':'issue','title':'پرسش آزمایشی '+secrets.token_hex(6),'short_label':'برچسب آزمون','related_topics':[child]})['id']
 assert admin.req('/api/v1/taxonomy/save',{'id':root,'kind':'topic','title':'HTTP17 cycle','parent_id':child})[0]==409
-topic_page=guest.get('/topic?id='+root);assert child in topic_page and 'زیرموضوع‌ها' in topic_page and issue in topic_page
-assert 'برچسب آزمون' in guest.get('/issue?id='+issue)
-assert 'مسئله‌های مشترک' in guest.get('/issues') and 'راهنمای استفاده' in guest.get('/guide')
+topic_page=guest.get('/topic?id='+root);assert 'dimension-filter' in topic_page and 'زیرموضوع‌ها' not in topic_page
+assert 'dimension-filter' in guest.get('/issue?id='+issue)
+assert 'dimension-filter' in guest.get('/issues') and 'راهنمای استفاده' in guest.get('/guide')
 assert 'discovery-tabs' not in guest.get('/mentors') and 'catalog-experience' not in guest.get('/mentors')
 assert 'discovery-tabs' not in guest.get('/experiences') and 'catalog-mentor' not in guest.get('/experiences')
 original=admin.get('/api/v1/storefront')['current']['version_id']
