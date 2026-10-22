@@ -4,7 +4,7 @@ namespace Morshed\Core;
 final class Database
 {
     public \PDO $pdo;
-    private array $readyFeatures=[];private int $queryCount=0;
+    private array $readyFeatures=[];private array $readCache=[];private int $queryCount=0;
     public function featureReady(string $key):bool{return isset($this->readyFeatures[$key]);}
     public function markFeatureReady(string $key):void{$this->readyFeatures[$key]=true;}
     public function queryCount():int{return $this->queryCount;}
@@ -19,15 +19,18 @@ final class Database
         $this->pdo->exec("SET time_zone = '+00:00'");
     }
     public function run(string $sql, array $args = []): \PDOStatement
-    { $this->queryCount++;$q = $this->pdo->prepare($sql); $q->execute($args); return $q; }
+    { if(!preg_match('/^\s*(SELECT|SHOW)\b/i',$sql)){$this->readCache=[];}$this->queryCount++;$q = $this->pdo->prepare($sql); $q->execute($args); return $q; }
     public function one(string $sql, array $args = []): ?array
     { return $this->run($sql, $args)->fetch() ?: null; }
     public function all(string $sql, array $args = []): array
     { return $this->run($sql, $args)->fetchAll(); }
+    /** Request-local reference-data cache; every write invalidates it. Never caches locks or identities. */
+    public function allCached(string $sql,array $args=[]):array
+    {if(!preg_match('/^SELECT\b/i',$sql)||preg_match('/FOR UPDATE|LOCK IN SHARE MODE/i',$sql)){throw new \LogicException('Only unlocked reference reads may be cached.');}$key=hash('sha256',$sql.serialize($args));return $this->readCache[$key]??= $this->all($sql,$args);}
     public function tx(callable $callback): mixed
     {
-        $this->pdo->beginTransaction();
-        try { $result = $callback(); $this->pdo->commit(); return $result; }
-        catch (\Throwable $e) { if ($this->pdo->inTransaction()) { $this->pdo->rollBack(); } throw $e; }
+        $this->readCache=[];$this->pdo->beginTransaction();
+        try { $result = $callback(); $this->pdo->commit(); $this->readCache=[];return $result; }
+        catch (\Throwable $e) { if ($this->pdo->inTransaction()) { $this->pdo->rollBack(); }  $this->readCache=[];throw $e; }
     }
 }

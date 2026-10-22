@@ -21,7 +21,7 @@ assert 'discovery-tabs' not in guest.get('/experiences') and 'catalog-mentor' no
 original=admin.get('/api/v1/storefront')['current']['version_id']
 draft=admin.post('/storefront/save',{'blocks_json':json.dumps([{'type':'topics','title':'آیکون‌های موضوع','ids':[root,child],'mode':'manual','count':10},{'type':'issues','title':'پرسش‌های کاربردی','ids':[issue],'mode':'manual'},{'type':'text','title':'بخش غیرفعال آزمون','enabled':0}],ensure_ascii=False)})['id']
 admin.post('/storefront/publish',{'id':draft});home=guest.get('/')
-assert home.index('آیکون‌های موضوع')<home.index('پرسش‌های کاربردی')
+assert home.index('classification-band-topics')<home.index('classification-band-issues');assert 'آیکون‌های موضوع' not in home and 'پرسش‌های کاربردی' not in home
 assert home.count('class="thumbnail-topic"')==3 and 'بخش غیرفعال آزمون' not in home
 assert 'service-card' not in home and '/assets/morshed-logo-transparent-288.png' in home
 png=io.BytesIO();Image.new('RGBA',(128,128),(50,190,140,128)).save(png,format='PNG')

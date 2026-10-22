@@ -52,7 +52,7 @@ final class ClassificationDetails
         }
     }
     public function metadata():array
-    {$this->storage();return array_column($this->db->all('SELECT * FROM m_term_metadata'),null,'term_id');}
+    {$this->storage();return array_column($this->db->allCached('SELECT * FROM m_term_metadata'),null,'term_id');}
     public function breadcrumbs(string $id):array
     {$this->storage();return $this->db->all('SELECT t.id,t.title FROM m_topic_paths p JOIN m_terms t ON t.id=p.ancestor_id AND t.active=1 WHERE p.descendant_id=? ORDER BY p.depth DESC',[$id]);}
 }

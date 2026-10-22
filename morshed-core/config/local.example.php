@@ -12,5 +12,7 @@ return [
         'allowed_recipients'=>[],'username'=>'','password'=>'','sender'=>''],
     'google'=>['enabled'=>false,'live_verified'=>false,'client_id'=>'','client_secret'=>'','redirect_uri'=>'https://morshedapp.ir/index.php?r=%2Fauth%2Fgoogle%2Fcallback'],
     'eitaa'=>['enabled'=>false,'live_verified'=>false,'app_token'=>''],
-    // Public booking, recording-terms publication and media are hard-blocked in this release.
+    // Private Jitsi configuration. Activate only after two-device and Eitaa checks.
+    'jitsi'=>['enabled'=>false,'live_verified'=>false,'origin'=>'','app_id'=>'morshed','app_secret'=>'','subject'=>''],
+    // Booking intake is enabled; media transport remains independently gated.
 ];

@@ -63,7 +63,9 @@ function morshed_run(string $realm):void
         $scripts="'self'";$forms="'self'";
         if($realm==='site'&&($config['google']['enabled']??false)&&($config['google']['live_verified']??false)){$forms.=' https://accounts.google.com';}
         if($realm==='site'&&($config['eitaa']['enabled']??false)&&($config['eitaa']['live_verified']??false)){$scripts.=' https://developer.eitaa.com';$forms.=' https://eitaa.com';}
-        header("Content-Security-Policy: default-src 'self'; script-src $scripts; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action $forms");
+        $frame="'none'";$requestPath=$_GET['r']??parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH);
+        if($realm==='site'&&$requestPath==='/meeting'&&($meetingOrigin=\Morshed\Product\MeetingRooms::origin($config))){$scripts.=' '.$meetingOrigin;$frame=$meetingOrigin;header('Permissions-Policy: camera=(self "'.$meetingOrigin.'"), microphone=(self "'.$meetingOrigin.'"), geolocation=()');header('Referrer-Policy: no-referrer');}
+        header("Content-Security-Policy: default-src 'self'; script-src $scripts; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-src $frame; frame-ancestors 'none'; base-uri 'none'; form-action $forms");
         (new \Morshed\Http\Application($config,$realm))->run();
     }catch(\Morshed\Core\Problem $e){
         http_response_code($e->status);

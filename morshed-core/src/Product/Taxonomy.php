@@ -24,7 +24,7 @@ final class Taxonomy
         }$this->ready=true;$this->db->markFeatureReady('taxonomy15');
     }
     public function decorate(array $rows):array
-    {$this->storage();$icons=array_column($this->db->all('SELECT term_id,icon FROM m_term_icons'),'icon','term_id');$meta=(new ClassificationDetails($this->db))->metadata();foreach($rows as &$row){$row['icon']=$icons[$row['id']]??'book';$row+=($meta[$row['id']]??['short_label'=>'','description'=>'','icon_asset_id'=>null,'display_order'=>0]);}unset($row);$index=array_column($rows,null,'id');foreach($rows as &$row){$trail=[$row['title']];$parent=$row['parent_id']??null;$seen=[$row['id']=>true];while($parent&&isset($index[$parent])&&!isset($seen[$parent])){$seen[$parent]=true;array_unshift($trail,$index[$parent]['title']);$parent=$index[$parent]['parent_id']??null;}$row['path_title']=implode(' / ',$trail);}unset($row);return $rows;}
+    {$this->storage();$icons=array_column($this->db->allCached('SELECT term_id,icon FROM m_term_icons'),'icon','term_id');$meta=(new ClassificationDetails($this->db))->metadata();foreach($rows as &$row){$row['icon']=$icons[$row['id']]??'book';$row+=($meta[$row['id']]??['short_label'=>'','description'=>'','icon_asset_id'=>null,'display_order'=>0]);}unset($row);$index=array_column($rows,null,'id');foreach($rows as &$row){$trail=[$row['title']];$parent=$row['parent_id']??null;$seen=[$row['id']=>true];while($parent&&isset($index[$parent])&&!isset($seen[$parent])){$seen[$parent]=true;array_unshift($trail,$index[$parent]['title']);$parent=$index[$parent]['parent_id']??null;}$row['path_title']=implode(' / ',$trail);}unset($row);return $rows;}
     public function icon(string $id,string $icon):void
     {Policy::choice($icon,array_keys(self::ICONS));$this->db->run('INSERT INTO m_term_icons(term_id,icon) VALUES(?,?) ON DUPLICATE KEY UPDATE icon=VALUES(icon)',[$id,$icon]);}
     public static function condition(string $version='v',string $term='ft'):string
@@ -65,11 +65,11 @@ final class Taxonomy
     public function topics():array
     {
         $this->storage();(new Classifications($this->db))->storage();$condition=self::condition();
-        $rows=$this->decorate($this->db->all("SELECT ft.*, (SELECT COUNT(*) FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id WHERE m.status='active' AND u.status='active' AND $condition) AS experience_count FROM m_terms ft WHERE ft.kind='topic' AND ft.active=1 ORDER BY ft.title"));usort($rows,fn($a,$b)=>[(int)$a['display_order'],$a['title']]<=>[(int)$b['display_order'],$b['title']]);return $rows;
+        $rows=$this->decorate($this->db->allCached("SELECT ft.*, (SELECT COUNT(*) FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id JOIN m_mentors m ON m.user_id=e.mentor_id JOIN m_users u ON u.id=m.user_id WHERE m.status='active' AND u.status='active' AND $condition) AS experience_count FROM m_terms ft WHERE ft.kind='topic' AND ft.active=1 ORDER BY ft.title"));usort($rows,fn($a,$b)=>[(int)$a['display_order'],$a['title']]<=>[(int)$b['display_order'],$b['title']]);return $rows;
     }
     public function issues():array
     {
-        $this->storage();(new Classifications($this->db))->storage();$condition=self::condition();$rows=$this->decorate($this->db->all("SELECT ft.*,(SELECT COUNT(*) FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id JOIN m_mentors m ON m.user_id=e.mentor_id AND m.status='active' JOIN m_users u ON u.id=m.user_id AND u.status='active' WHERE $condition) AS experience_count FROM m_terms ft WHERE ft.kind='issue' AND ft.active=1"));
+        $this->storage();(new Classifications($this->db))->storage();$condition=self::condition();$rows=$this->decorate($this->db->allCached("SELECT ft.*,(SELECT COUNT(*) FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id JOIN m_mentors m ON m.user_id=e.mentor_id AND m.status='active' JOIN m_users u ON u.id=m.user_id AND u.status='active' WHERE $condition) AS experience_count FROM m_terms ft WHERE ft.kind='issue' AND ft.active=1"));
         usort($rows,fn($a,$b)=>[(int)$a['display_order'],$a['title']]<=>[(int)$b['display_order'],$b['title']]);return $rows;
     }
     public function issue(string $id):array

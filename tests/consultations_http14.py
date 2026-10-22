@@ -37,7 +37,7 @@ assert any(r['id']==booking for r in user.get('/api/v1/sessions?direction=outgoi
 assert user.req('/api/v1/booking/action',{'id':booking,'action':'accept'})[0]==409
 host.post('/booking/action',{'id':booking,'action':'accept'})
 assert any(n['title']=='جلسه شما قطعی شد' for n in user.get('/api/v1/notifications')['notifications'])
-html=host.get('/booking?id='+booking);assert 'ورود به جلسه · به‌زودی' in html and 'disabled' in html
+html=host.get('/booking?id='+booking);assert 'مشاهدهٔ اتاق جلسه' in html; room_page=host.get('/meeting?id='+booking);assert 'سرور تماس در حال آماده‌سازی است.' in room_page and 'data-join-method=' not in room_page
 user.post('/booking/action',{'id':booking,'action':'cancel','note':'دلیل لغو آزمون'})
 assert host.get(route)['booking']['state']=='cancelled'
 host.post('/mentor/calendar/remove',{'kind':'date','id':rule['id']})
