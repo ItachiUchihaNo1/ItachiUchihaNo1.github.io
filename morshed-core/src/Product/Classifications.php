@@ -67,6 +67,18 @@ final class Classifications
     }
     private function allowed(string $table,string $id,?string $oldVersion,string $relation,string $column):bool
     {return (bool)$this->db->one("SELECT id FROM $table WHERE id=? AND (active=1 OR EXISTS(SELECT 1 FROM $relation x WHERE x.version_id=? AND x.$column=$table.id))",[$id,$oldVersion??'']);}
+    public function termUsage():array
+    {
+        $this->storage();return array_column($this->db->all('SELECT COALESCE(r.target_id,x.term_id) AS term_id,COUNT(DISTINCT v.experience_id) AS total FROM (SELECT term_id,id AS version_id FROM m_experience_versions WHERE term_id IS NOT NULL UNION SELECT term_id,version_id FROM m_experience_topics UNION SELECT term_id,version_id FROM m_experience_issues UNION SELECT term_id,version_id FROM m_problem_tags) x LEFT JOIN m_term_redirects r ON r.source_id=x.term_id JOIN m_experience_versions v ON v.id=x.version_id GROUP BY COALESCE(r.target_id,x.term_id)'),'total','term_id');
+    }
+    public function problemLinks():array
+    {
+        $this->storage();return $this->db->all('SELECT p.title,p.description,p.version_id,v.experience_id,COALESCE(r.target_id,pt.term_id) AS term_id FROM m_experience_problems p JOIN m_problem_tags pt ON pt.version_id=p.version_id AND pt.problem_id=p.id LEFT JOIN m_term_redirects r ON r.source_id=pt.term_id JOIN m_experience_versions v ON v.id=p.version_id WHERE v.version_no=(SELECT MAX(vv.version_no) FROM m_experience_versions vv WHERE vv.experience_id=v.experience_id) ORDER BY p.title LIMIT 500');
+    }
+    public function editorOrganizations(string $version):array
+    {
+        $this->storage();return $this->db->all('SELECT x.org_id AS original_org_id,x.status,x.relation_type,x.is_primary,o.id AS org_id,o.name,o.active,p.org_type FROM m_experience_organizations x JOIN m_organization_profiles source ON source.org_id=x.org_id JOIN m_organizations o ON o.id=COALESCE(source.merged_into,x.org_id) JOIN m_organization_profiles p ON p.org_id=o.id WHERE x.version_id=? ORDER BY x.is_primary DESC,o.name',[$version]);
+    }
     public function assign(string $version,?string $previous,array $d,array $actor):void
     {
         $old=$previous?$this->version($previous):['problems'=>[],'audiences'=>[],'context'=>[],'proposals'=>[]];
@@ -104,7 +116,7 @@ final class Classifications
         }
         if($mode==='existing'){
             $record=$this->db->one('SELECT o.id FROM m_organizations o JOIN m_organization_profiles p ON p.org_id=o.id WHERE o.id=? AND p.org_type=? AND o.active=1 AND p.merged_into IS NULL',[$org,$type]);if(!$record){throw new Problem('INVALID_ORGANIZATION','مجموعه باید متعلق به نوع انتخاب‌شده باشد.');}
-            $approved=$previous?$this->db->one("SELECT * FROM m_experience_organizations WHERE version_id=? AND org_id=? AND status='approved'",[$previous,$org]):null;
+            $approved=$previous?$this->db->one("SELECT x.* FROM m_experience_organizations x JOIN m_organization_profiles p ON p.org_id=x.org_id WHERE x.version_id=? AND COALESCE(p.merged_into,x.org_id)=? AND x.status='approved'",[$previous,$org]):null;
             $this->db->run('INSERT INTO m_experience_organizations VALUES(?,?,?,?,?,?,?,?,?,?)',[$version,$org,$approved['relation_type']??'formed_at',1,$approved?'approved':'proposed',$approved['raw_name']??'',$approved['internal_note']??'',$approved['reviewed_by']??null,$approved['reviewed_at']??null,$approved['evidence']??'']);
         }elseif($mode==='proposed'){$this->propose($version,$type,Policy::text($d['organization_name']??'',720),$actor);}
     }
