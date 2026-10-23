@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS m_eitaa_deliveries (notification_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,state VARCHAR(20) NOT NULL,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,INDEX(state,created_at),FOREIGN KEY(notification_id) REFERENCES m_notifications(id)) ENGINE=InnoDB;

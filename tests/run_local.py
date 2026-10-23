@@ -106,6 +106,7 @@ try:
     php_run('classification17.php')
     php_run('classification20.php')
     php_run('release21.php')
+    php_run('release22.php')
     php_run('http_fixture_secret.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')
@@ -391,6 +392,8 @@ try:
     subprocess.run([sys.executable,str(app/'tests/classification20_http.py'),str(scratch)],check=True)
     php_run('reset_test_limits.php')
     subprocess.run([sys.executable,str(app/'tests/release21_http.py'),str(scratch)],check=True)
+    subprocess.run([sys.executable,str(app/'tests/release22_http.py'),str(scratch)],check=True)
+    subprocess.run([sys.executable,str(app/'tests/release22_clean_urls.py'),str(scratch)],check=True)
     dumpbin=server.parent/('mariadb-dump.exe' if os.name=='nt' else 'mariadb-dump')
     if dumpbin.exists():
         dbname=cfg['database']['dsn'].split('dbname=')[1].split(';')[0];dumpfile=scratch/'private-test-backup.sql'

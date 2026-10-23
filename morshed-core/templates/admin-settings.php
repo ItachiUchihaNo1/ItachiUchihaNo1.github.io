@@ -3,3 +3,5 @@
 <section class="card section"><h2>راهنمای اتصال‌ها</h2><p>تنظیمات را در فایل خصوصی <bdi>morshed-core/config/local.php</bdi> وارد کنید؛ فایل نمونه جایگزین تنظیمات فعلی نمی‌شود. فعال‌بودن یک کلید به‌تنهایی به معنی موفقیت آزمون اتصال نیست.</p><a class="textlink" href="https://github.com/ItachiUchihaNo1/ItachiUchihaNo1.github.io/blob/main/docs/CONNECT-SERVICES-STEP-BY-STEP-FA.md" rel="noopener">راهنمای گام‌به‌گام پیامک، گوگل و ایتا</a></section>
 
 <section class="card section"><h2>تماس صوتی و تصویری Jitsi</h2><p><?= \Morshed\Product\MeetingRooms::origin($this->config)?'پیکربندی فعال است؛ وضعیت عملی اتصال را با یک جلسهٔ آزمایشی بررسی کنید.':'آمادهٔ پیکربندی؛ سرور تماس هنوز فعال نشده است.' ?></p><p class="small muted">نشانی HTTPS، شناسهٔ برنامه و کلید مشترک فقط در تنظیمات خصوصی هاست ثبت می‌شوند. کلید محرمانه در این صفحه نمایش داده نمی‌شود. ورود بر اساس طرفین جلسه، وضعیت تأیید و زمان رزرو کنترل می‌شود.</p></section>
+
+<section class="card section"><h2>ارسال اعلان در ایتا</h2><a class="primary" href="<?= $this->h($this->url('/eitaa-delivery')) ?>">آزمون ارسال و گزارش تحویل ایتا</a></section>

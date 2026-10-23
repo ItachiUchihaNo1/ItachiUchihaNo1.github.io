@@ -43,8 +43,8 @@ final class AtlasData
     }
     public function saveOrganization(array $a,array $d):string
     {
-        (new Policy($this->db))->admin($a,true);$this->storage();$four=new Classifications($this->db);$four->storage();
-        return $this->db->tx(function()use($a,$d){
+        (new Policy($this->db))->admin($a,true);$this->storage();$four=new Classifications($this->db);$four->storage();$extra=new Contributions($this->db);$values=$extra->prepareDetails($a,$d);
+        return $this->db->tx(function()use($a,$d,$extra,$values){
             $this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');
             $id=($d['id']??'')?:Security::id();if(!Security::validId($id)){throw new Problem('INVALID_INPUT','شناسه معتبر نیست.');}
             $old=$this->db->one('SELECT o.*,p.* FROM m_organizations o LEFT JOIN m_organization_profiles p ON p.org_id=o.id WHERE o.id=?',[$id]);
@@ -56,7 +56,7 @@ final class AtlasData
             $this->db->run('INSERT INTO m_organization_profiles(org_id,description,org_type,province_id,county_id,verified_at,verified_by,updated_at) VALUES(?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE description=VALUES(description),org_type=VALUES(org_type),province_id=VALUES(province_id),county_id=VALUES(county_id),verified_at=VALUES(verified_at),verified_by=VALUES(verified_by),updated_at=VALUES(updated_at)',[$id,$description,$type,$province,$county,$verified,$verified?$a['user_id']:null,time()]);
             $this->db->run('INSERT INTO m_organization_type_links VALUES(?,?) ON DUPLICATE KEY UPDATE type_id=VALUES(type_id)',[$id,$type]);
             $aliases=Policy::text($d['aliases']??'',1600,0);$this->db->run('DELETE FROM m_organization_aliases WHERE org_id=?',[$id]);foreach(array_unique(array_filter(array_map('trim',explode("\n",$aliases)))) as $alias){$this->db->run('INSERT INTO m_organization_aliases(org_id,alias) VALUES(?,?)',[$id,Policy::text($alias,180)]);}
-            $this->change($a,$id,'organization.saved',$old,['name'=>$name,'type'=>$type,'province'=>$province,'county'=>$county,'verified'=>$verified,'active'=>$active]);return $id;
+            $extra->saveDetails($id,$values);$this->change($a,$id,'organization.saved',$old,['name'=>$name,'type'=>$type,'province'=>$province,'county'=>$county,'verified'=>$verified,'active'=>$active,'public_details'=>$values]);return $id;
         });
     }
     public function merge(array $a,string $from,string $into):void

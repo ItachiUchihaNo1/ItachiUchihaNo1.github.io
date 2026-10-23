@@ -33,7 +33,7 @@ assert image_status(guest)[0]==404 and image_status(other)[0]==404
 account_page=second.get('/account');assert 'nav-avatar' not in account_page and asset in account_page
 nav=guest.get('/').split('aria-label="ناوبری اصلی"')[1].split('</nav>')[0]
 assert 'اطلس' in nav and 'جلسات' not in nav and nav.count('<a ')==5
-home=guest.get('/');assert 'header-account' in home and 'site-menu' in home and 'mode=register' in home
+home=guest.get('/');assert 'header-account' not in home and 'site-menu' in home and 'ورود/ثبت نام' in home
 assert 'اطلس مرشد' in guest.get('/atlas')
 stale=guest.get('/slots?mentor_id='+p['mentor_id']+'&date=2020-01-01&duration_minutes=15')
 assert 'درخواست انجام نشد' not in stale and 'dateCorrected' not in stale and 'تاریخ لینک قبلی' in stale

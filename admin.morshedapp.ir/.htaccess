@@ -13,6 +13,9 @@ Require all denied
 # Cache versioned static assets only. PHP pages retain private/no-store headers.
 <IfModule mod_expires.c>
 ExpiresActive On
+<FilesMatch "^(provinces|osm-[0-9]+)\.json$">
+ExpiresDefault "access plus 7 days"
+</FilesMatch>
 ExpiresByType text/css "access plus 30 days"
 ExpiresByType application/javascript "access plus 30 days"
 ExpiresByType text/javascript "access plus 30 days"

@@ -3,3 +3,5 @@
 .atlas-map [hidden]{display:none!important}
 
 .atlas-filter-toggle{display:none}@media(max-width:700px){.atlas-filter-toggle{display:flex;align-items:center;justify-content:space-between;font-weight:700;min-height:44px}.atlas-filters h2{display:none}.atlas-filters form{padding-top:18px}}
+
+.atlas-map path[data-level=populated]{fill:#e0ece6}.atlas-presence{fill:#d73939;stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke;cursor:pointer}.atlas-presence:focus,.atlas-presence:hover{fill:#9e1c1c;outline:none;stroke:#092c3b}

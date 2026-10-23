@@ -55,9 +55,10 @@ final class Catalog
         if(!$rows){return [];}$this->storage();$ids=array_values(array_unique(array_column($rows,'id')));$marks=implode(',',array_fill(0,count($ids),'?'));
         $views=array_column($this->db->all("SELECT experience_id,views FROM m_experience_metrics WHERE experience_id IN ($marks)",$ids),'views','experience_id');
         $facts=[];foreach($this->db->all("SELECT e.id,m.avatar_asset_id FROM m_experiences e JOIN m_mentors m ON m.user_id=e.mentor_id WHERE e.id IN ($marks)",$ids) as $fact){$facts[$fact['id']]=$fact;}
+        $covers=[];foreach($this->db->all("SELECT e.id,MIN(a.id) AS asset_id FROM m_experiences e JOIN m_experience_assets ea ON ea.version_id=e.public_version_id JOIN m_content_assets a ON a.id=ea.asset_id AND a.media_type IN ('image/png','image/jpeg','image/webp') WHERE e.id IN ($marks) GROUP BY e.id",$ids) as $cover)$covers[$cover['id']]=$cover['asset_id'];
         $labels=(new Taxonomy($this->db))->labels(array_column($rows,'version_id'));
         foreach($rows as &$row){
-            $fact=$facts[$row['id']]??[];$row['views']=(int)($views[$row['id']]??0);$row['mentor_avatar_asset_id']=$fact['avatar_asset_id']??null;
+            $row['cover_asset_id']=$covers[$row['id']]??null;$fact=$facts[$row['id']]??[];$row['views']=(int)($views[$row['id']]??0);$row['mentor_avatar_asset_id']=$fact['avatar_asset_id']??null;
             $label=$labels[$row['version_id']]??[];$row['topic_id']=$label['topic']['id']??null;$row['topic_title']=$label['topic']['title']??'تجربهٔ عملی';$row['topic_icon']=$label['topic']['icon']??'book';$row['issue_tags']=$label['issues']??[];
         }unset($row);return $rows;
     }

@@ -7,7 +7,7 @@ $groups=[
 ];
 if($system){
  $groups['محتوا و ویترین']+=['/mentors'=>'مرشدها','/atlas/manage'=>'مجموعه‌ها و اطلس','/knowledge'=>'روابط و فراداده'];
- $groups['کاربران و جلسات']=['/users'=>'کاربران','/bookings'=>'جلسات','/support'=>'درخواست‌های پشتیبانی','/archives'=>'مجوزهای آرشیو','/organizations'=>'عضویت عملیاتی'];
+ $groups['کاربران و جلسات']=['/users'=>'کاربران','/bookings'=>'جلسات','/experience-leads'=>'پیشنهادهای تجربه','/support'=>'درخواست‌های پشتیبانی','/archives'=>'مجوزهای آرشیو','/organizations'=>'عضویت عملیاتی'];
  $groups['حساب کاربری مدیریت']+=['/admins'=>'دسترسی مدیران','/settings'=>'وضعیت اتصال‌ها'];
  $groups['تنظیمات سامانه']=['/general'=>'تنظیمات عمومی','/legal'=>'قوانین پایه','/notification-templates'=>'قالب اعلان','/notification-deliveries'=>'سوابق اعلان'];
  $groups['گزارش و نظارت']=['/reports'=>'گزارش‌ها','/audit'=>'حسابرسی'];

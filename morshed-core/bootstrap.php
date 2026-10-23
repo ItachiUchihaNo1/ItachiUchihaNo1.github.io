@@ -54,7 +54,7 @@ function morshed_run(string $realm):void
         $stage='config_file';
         $file=__DIR__.'/config/local.php';if(!is_file($file)){throw new \RuntimeException('Private configuration missing.');}
         $stage='config_load';
-        $config=require $file;
+        $config=require $file;if($realm==='site'&&is_array($config)&&in_array($config['environment']??'',['production','staging'],true)){$config['pretty_urls']=true;}
         $stage='config_validate';
         if(!is_array($config)||!preg_match('/^[a-f0-9]{64}$/D',$config['app_key']??'')||!in_array($config['environment']??'',['staging','production','testing'],true)){throw new \RuntimeException('Invalid configuration.');}
         if(!is_array($config['database']??null)||!is_string($config['database']['dsn']??null)||!is_string($config['database']['user']??null)||!is_string($config['database']['password']??null)){throw new \RuntimeException('Database configuration incomplete.');}

@@ -1,0 +1,1 @@
+<?php if(in_array($kind,['mentors','experiences'],true)): ?><label class="view-toggle"><input type="checkbox" data-view-toggle="<?= $this->h($kind) ?>">نمایش بندانگشتی</label><?php endif; ?>

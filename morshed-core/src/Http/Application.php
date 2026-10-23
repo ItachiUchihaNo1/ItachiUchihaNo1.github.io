@@ -23,17 +23,22 @@ final class Application
         if(!session_start()){throw new \RuntimeException('CSRF session unavailable.');}
         $_SESSION['csrf']??=bin2hex(random_bytes(32));
         $this->db=new Database($config['database']);$audit=new Audit($this->db);$rate=new RateLimiter($this->db,$config['app_key']);
-        if(!in_array((int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn(),[6,7],true)){throw new \RuntimeException('Database migration version mismatch.');}
+        $schemaVersion=(int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn();if(!in_array($schemaVersion,[6,7],true)){throw new \RuntimeException('Database migration version mismatch.');}
         $this->sessions=new Sessions($this->db,$audit);$this->admin=new Administration($this->db,$rate,$audit,$config['setup']??[]);
         $this->accounts=new Accounts($this->db,$rate,$audit,new TsmsSendOnlyGateway($config['sms']??[],new CurlFormTransport()),$config['app_key']);
         $this->legal=new Documents($this->db,$audit);$this->external=new ExternalAccounts($this->db,$audit,$rate,new ProviderHttp(),$config);
         $token=$_COOKIE[$this->cookie]??null;$this->actor=$this->sessions->resolve(is_string($token)?$token:null,$realm);
-        if($realm==='site'&&$this->actor){$this->actor['avatar_asset_id']=(new \Morshed\Product\ContentAssets($this->db,$audit))->avatar($this->actor['user_id']);}
-        $config['_schema_version']=(int)$this->db->run('SELECT MAX(version) FROM m_schema_migrations')->fetchColumn();if($config['_schema_version']>=7){$this->db->markFeatureReady('schema7');}$this->view=new View($config,$realm,$_SESSION['csrf'],$this->actor);
+        if($realm==='site'&&$this->actor&&str_starts_with(is_string($_GET['r']??null)?$_GET['r']:(parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH)?:'/'),'/account')){$this->actor['avatar_asset_id']=(new \Morshed\Product\ContentAssets($this->db,$audit))->avatar($this->actor['user_id']);}
+        $config['_schema_version']=$schemaVersion;if($config['_schema_version']>=7){$this->db->markFeatureReady('schema7');}$this->view=new View($config,$realm,$_SESSION['csrf'],$this->actor);
         $raw=$_GET['r']??parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH);
         if(!is_string($raw)||strlen($raw)>200||!str_starts_with($raw,'/')||str_contains($raw,'..')){throw new Problem('NOT_FOUND','صفحه پیدا نشد.',404);}
         $this->path=$raw==='/index.php'?'/':$raw;$raw=$this->path;$this->api=str_starts_with($raw,'/api/v1/');if($this->api){$this->path=substr($raw,7);}
         $this->method=$_SERVER['REQUEST_METHOD']??'GET';
+        if($this->method==='POST'){$delivery=new \Morshed\Product\EitaaDelivery($this->db,$config);if($delivery->enabled()){$delivery->storage();if(($config['environment']??'')!=='testing')register_shutdown_function(static function()use($delivery){if(!function_exists('fastcgi_finish_request'))return;session_write_close();fastcgi_finish_request();try{$delivery->dispatch(3);}catch(\Throwable $e){error_log('Morshed: Eitaa delivery deferred');}});}}
+
+        // Only ordinary public legacy GET pages redirect. Home app entry (including fragment initData) and auth callbacks never redirect.
+        if($realm==='site'&&($config['pretty_urls']??false)&&$this->method==='GET'&&isset($_GET['r'])&&in_array($this->path,['/mentors','/experiences','/atlas','/organizations','/organization','/experience','/mentor/profile','/topics','/topic','/issues','/issue','/about'],true)&&!array_intersect(['hash','initData','init_data','tgWebAppData','eitaaWebAppData','state','code'],array_keys($_GET))){$q=$_GET;unset($q['r']);header('Location: '.$this->path.($q?'?'.http_build_query($q):''),true,301);exit;}
+
         if($this->method==='POST'){
             if(str_starts_with(strtolower($_SERVER['CONTENT_TYPE']??''),'application/json')){
                 $limit=in_array($this->path,['/experience/save','/mentor/experience/save'],true)?524288:20000;$body=file_get_contents('php://input',false,null,0,$limit+1);if(strlen($body)>$limit){throw new Problem('TOO_LARGE','درخواست بیش از حد بزرگ است.',413);}
@@ -57,7 +62,7 @@ final class Application
     private function queryString(string $key,int $max):string{ $v=$_GET[$key]??'';if(!is_string($v)||strlen($v)>$max){throw new Problem('INVALID_INPUT','پارامتر ورود معتبر نیست.');}return $v;}
     private function requireActor():array
     {
-        if(!$this->actor){if(!$this->api&&$this->method==='GET'){if(in_array($this->path,['/account','/account/saved','/account/saved/set','/account/security','/account/profile','/account/rules','/account/phone','/account/complete','/account/sessions','/me/sessions','/notifications','/security'],true)){$_SESSION['return_to']=$this->path;}$this->redirect('/login');}throw new Problem('UNAUTHENTICATED','ابتدا وارد حساب شوید.',401);}return $this->actor;
+        if(!$this->actor){if(!$this->api&&$this->method==='GET'){if(in_array($this->path,['/account','/account/saved','/account/saved/set','/account/security','/account/profile','/account/rules','/account/phone','/account/complete','/account/sessions','/me/sessions','/notifications','/security'],true)){$_SESSION['return_to']=ReturnTo::current();}$this->redirect('/login');}throw new Problem('UNAUTHENTICATED','ابتدا وارد حساب شوید.',401);}return $this->actor;
     }
     private function csrf():void
     {
@@ -89,9 +94,9 @@ final class Application
     private function completedAccount():void
     {
         if($this->realm!=='site'||!$this->actor){return;}
-        $protected=in_array($this->path,['/meeting','/meeting/token','/account','/account/security','/account/profile','/account/rules','/account/phone','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
+        $protected=in_array($this->path,['/experience/submit','/meeting','/meeting/token','/account','/account/security','/account/profile','/account/rules','/account/phone','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
         if(($protected||$this->path==='/account/complete')&&$this->needsEitaaPhone($this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$this->redirect('/account/identify');}throw new Problem('PHONE_REQUIRED','ابتدا شماره را تأیید کنید تا حساب قبلی شما شناسایی شود.',409);}if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
-        if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=$this->path;$this->redirect($this->afterLogin());}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
+        if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=ReturnTo::current();$this->redirect($this->afterLogin());}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
     }
     public function run():void
     {
@@ -207,7 +212,7 @@ final class Application
     private function get(?string $error=null):void
     {
         if($this->api&&$this->path==='/csrf'){$this->json(['csrf'=>$_SESSION['csrf']]);return;}
-        if($this->path==='/login'){$this->view->page($this->realm==='admin'?'ورود مدیریت':'ورود به مرشد',$this->realm==='admin'?'admin-login':'login',['setupAvailable'=>$this->realm==='admin'&&($this->config['setup']['enabled']??false)&&!$this->db->one('SELECT bootstrapped_at FROM m_installation WHERE id=1')['bootstrapped_at']],$error);return;}
+        if($this->path==='/login'){if($this->realm==='site'&&($return=ReturnTo::safe($_GET['return_to']??null))){$_SESSION['return_to']=$return;}$this->view->page($this->realm==='admin'?'ورود مدیریت':'ورود به مرشد',$this->realm==='admin'?'admin-login':'login',['setupAvailable'=>$this->realm==='admin'&&($this->config['setup']['enabled']??false)&&!$this->db->one('SELECT bootstrapped_at FROM m_installation WHERE id=1')['bootstrapped_at']],$error);return;}
         if($this->realm==='admin'){$this->getAdmin($error);return;}
         if($this->path==='/'){$this->view->page('مرشد؛ گفت‌وگو با مرشد','home',[],$error);return;}
         if($this->path==='/auth/google/callback'){$r=$this->external->google($this->queryString('state',64),$this->queryString('code',4096),$_SESSION['external_browser']??'',$this->actor);if($r['purpose']==='login'){$this->issue($r['user_id'],'google');}$this->success($this->afterLogin());return;}
@@ -245,7 +250,7 @@ final class Application
             foreach(['mentors'=>"SELECT COUNT(*) FROM m_mentors WHERE status='active'",'experiences'=>'SELECT COUNT(*) FROM m_experiences WHERE public_version_id IS NOT NULL','bookings'=>'SELECT COUNT(*) FROM m_bookings'] as $key=>$sql){$stats[$key]=(int)$this->db->run($sql)->fetchColumn();}
             $canOperate=($a['admin_role']??'')==='system_admin';$daily=$canOperate?$this->db->all('SELECT FLOOR(created_at/86400) AS day,COUNT(*) AS total FROM m_bookings WHERE created_at>=? GROUP BY FLOOR(created_at/86400)',[strtotime('today UTC')-6*86400]):[];$counts=array_column($daily,'total','day');$trend=[];for($i=6;$i>=0;$i--){$day=(int)floor(time()/86400)-$i;$trend[]=['label'=>gmdate('m/d',$day*86400),'count'=>(int)($counts[$day]??0)];}
             $states=$canOperate?$this->db->all('SELECT state,COUNT(*) AS total FROM m_bookings GROUP BY state'):[];$recent=$canOperate?$this->db->all('SELECT b.id,b.state,b.created_at,u.display_name AS user_name,m.display_name AS mentor_name FROM m_bookings b JOIN m_users u ON u.id=b.user_id JOIN m_users m ON m.id=b.mentor_id ORDER BY b.created_at DESC LIMIT 5'):[];
-            $stats['support_open']=$canOperate?(int)$this->db->run("SELECT COUNT(*) FROM m_tickets WHERE state='open'")->fetchColumn():0;$this->view->page('داشبورد مدیریت','admin-dashboard',['canOperate'=>$canOperate,'stats'=>$stats,'trend'=>$trend,'bookingStates'=>$states,'recentBookings'=>$recent],$error);return;
+            if($canOperate){(new \Morshed\Product\Contributions($this->db))->storage();}$stats['experience_leads']=$canOperate?(int)$this->db->run("SELECT COUNT(*) FROM m_experience_leads WHERE state='open'")->fetchColumn():0;$stats['support_open']=$canOperate?(int)$this->db->run("SELECT COUNT(*) FROM m_tickets WHERE state='open'")->fetchColumn():0;$this->view->page('داشبورد مدیریت','admin-dashboard',['canOperate'=>$canOperate,'stats'=>$stats,'trend'=>$trend,'bookingStates'=>$states,'recentBookings'=>$recent],$error);return;
         }
         $this->admin->system($a);
         switch($this->path){
@@ -273,8 +278,9 @@ final class Application
         $path=$this->path;if(in_array($path,['/users/update','/users/role'],true)){$_GET['id']=$this->text('id',32);}
         if($path==='/auth/otp/request'&&$this->text('purpose',20)==='login'){$_GET['method']='otp';}
         if($this->method==='POST'){
+            if(in_array($path,['/experience/submit','/experience-leads/review','/eitaa-delivery/test'],true)&&$this->actor){$route=match($path){'/experience-leads/review'=>'/experience-leads','/eitaa-delivery/test'=>'/eitaa-delivery',default=>'/experience/submit'};try{(new ProductController($this->db,$this->view,$this->actor,$this->realm,false))->get($route,$e->getMessage());return;}catch(Problem $ignored){}}
             if(in_array($path,['/auth/otp/verify','/auth/password/reset','/me/phone/verify'],true)){$purpose=$path==='/auth/password/reset'?'reset':($path==='/me/phone/verify'?'change_phone':'login');$this->codeForm($this->text('challenge_id',32),$purpose,$e->getMessage());return;}
-            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/account/avatar','/me/profile'=>'/account/profile','/me/password','/me/identities/unlink'=>'/account/security','/legal/accept'=>'/account/rules','/me/eitaa/contact','/me/eitaa/phone/request'=>'/account/identify','/users/status','/users/delete','/users/restore'=>'/users','/users/update','/users/role'=>'/users/edit','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
+            $this->path=match($path){'/auth/password','/auth/eitaa/start','/auth/eitaa/complete','/auth/google/start'=>'/login','/auth/otp/resend'=>'/auth/otp/code','/auth/otp/request'=>$this->text('purpose',20)==='reset'?'/password/recover':'/login','/account/complete'=>'/account/complete','/account/avatar','/me/profile'=>'/account/profile','/account/eitaa/test','/me/password','/me/identities/unlink'=>'/account/security','/legal/accept'=>'/account/rules','/me/eitaa/contact','/me/eitaa/phone/request'=>'/account/identify','/users/status','/users/delete','/users/restore'=>'/users','/users/update','/users/role'=>'/users/edit','/users/create'=>'/users/new','/upgrade'=>'/','/admins/create','/admins/role'=>'/admins','/legal/create','/legal/publish'=>'/legal','/setup'=>'/setup',default=>$this->realm==='admin'?'/security':'/account'};
             try{$this->get($e->getMessage());return;}catch(Problem $ignored){}
         }
         $this->view->page('درخواست انجام نشد','error',['message'=>$e->getMessage(),'errorCode'=>$e->errorCode],$e->getMessage());

@@ -386,3 +386,8 @@ CREATE TABLE IF NOT EXISTS m_store_drafts (
  FOREIGN KEY(created_by) REFERENCES m_users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 INSERT IGNORE INTO m_schema_migrations(version,description) VALUES(7,'Account profiles, structured experience cases and reusable storefront drafts');
+
+CREATE TABLE IF NOT EXISTS m_experience_leads (id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,title VARCHAR(240) NOT NULL,summary TEXT NOT NULL,state VARCHAR(16) NOT NULL DEFAULT 'open',created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,INDEX(user_id,created_at),INDEX(state,created_at),FOREIGN KEY(user_id) REFERENCES m_users(id)) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS m_organization_details (org_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,logo_asset_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,website VARCHAR(1000) NOT NULL DEFAULT '',social_urls TEXT NOT NULL,representative_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,representative_role VARCHAR(180) NOT NULL DEFAULT '',updated_at BIGINT NOT NULL,FOREIGN KEY(org_id) REFERENCES m_organizations(id),FOREIGN KEY(representative_id) REFERENCES m_users(id)) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS m_eitaa_deliveries (notification_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,state VARCHAR(20) NOT NULL,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,INDEX(state,created_at),FOREIGN KEY(notification_id) REFERENCES m_notifications(id)) ENGINE=InnoDB;
