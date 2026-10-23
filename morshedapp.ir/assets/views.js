@@ -1,5 +1,5 @@
 (() => {
-'use strict';const kinds=['experiences','mentors'];
+'use strict';const kinds=['experiences','mentors','organizations'];
 const apply=(kind,on)=>{document.querySelectorAll('[data-view-toggle="'+kind+'"]').forEach(c=>c.checked=on);document.querySelectorAll('[data-view-kind="'+kind+'"]').forEach(grid=>{grid.classList.toggle('thumbnail-view',on);grid.querySelectorAll('[data-detail-url]').forEach(card=>{card.removeAttribute('tabindex');card.removeAttribute('role');});});};
 kinds.forEach(kind=>{let on=false;try{on=localStorage.getItem('morshed.view.'+kind)==='thumbnail';}catch(_){}apply(kind,on);});
 document.addEventListener('change',e=>{const kind=e.target.dataset.viewToggle;if(!kinds.includes(kind))return;apply(kind,e.target.checked);try{localStorage.setItem('morshed.view.'+kind,e.target.checked?'thumbnail':'card');}catch(_){}});

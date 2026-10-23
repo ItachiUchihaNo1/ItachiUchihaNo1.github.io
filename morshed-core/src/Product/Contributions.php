@@ -7,9 +7,11 @@ final class Contributions
  public function __construct(private Database $db){}
  public function storage():void {
   if($this->db->featureReady('contributions'))return;
-  try{$this->db->run('SELECT org_id FROM m_organization_details LIMIT 0');$this->db->run('SELECT id FROM m_experience_leads LIMIT 0');}catch(\PDOException $e){if((int)($e->errorInfo[1]??0)!==1146)throw $e;if($this->db->pdo->inTransaction())throw new \LogicException('Prepare storage before transaction');foreach(explode(';',file_get_contents(__DIR__.'/../../database/contributions.sql')) as $sql){if(trim($sql)!=='')$this->db->run($sql);}}
+  try{$this->db->run('SELECT entity_id FROM m_atlas_visibility LIMIT 0');$this->db->run('SELECT org_id FROM m_organization_details LIMIT 0');$this->db->run('SELECT id FROM m_experience_leads LIMIT 0');}catch(\PDOException $e){if((int)($e->errorInfo[1]??0)!==1146)throw $e;if($this->db->pdo->inTransaction())throw new \LogicException('Prepare storage before transaction');foreach(explode(';',file_get_contents(__DIR__.'/../../database/contributions.sql')) as $sql){if(trim($sql)!=='')$this->db->run($sql);}}
   $this->db->markFeatureReady('contributions');
  }
+ public function atlasVisible(string $kind,string $id):bool {$this->storage();$row=$this->db->one('SELECT approved FROM m_atlas_visibility WHERE entity_kind=? AND entity_id=?',[$kind,$id]);return !$row||(bool)$row['approved'];}
+ public function atlasDecision(array $a,string $kind,string $id,bool $approved):void {(new Policy($this->db))->admin($a);Policy::choice($kind,['experience','mentor','organization']);if(!Security::validId($id))throw new Problem('INVALID_INPUT','شناسه معتبر نیست.');$this->db->run('INSERT INTO m_atlas_visibility VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE approved=VALUES(approved),reviewed_by=VALUES(reviewed_by),reviewed_at=VALUES(reviewed_at)',[$kind,$id,(int)$approved,$a['user_id'],time()]);(new Audit($this->db))->add($a['user_id'],'admin',$approved?'atlas.approved':'atlas.hidden',$id);}
  public function submit(array $a,array $d):string {
   $uid=(new Policy($this->db))->user($a);$title=Policy::text($d['title']??'',960,4);if(preg_match_all('/./us',$title)>240)throw new Problem('INVALID_INPUT','عنوان باید حداکثر ۲۴۰ نویسه باشد.');$summary=Policy::text($d['summary']??'',6000,15);$this->storage();
   return $this->db->tx(function()use($uid,$title,$summary){$this->db->one('SELECT id FROM m_users WHERE id=? FOR UPDATE',[$uid]);

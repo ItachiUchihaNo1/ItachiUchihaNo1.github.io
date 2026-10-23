@@ -118,7 +118,7 @@ final class Administration
     public function userRole(array $actor,string $current,string $target,string $role,array $d=[]):void
     {
         $this->rate->hit('admin-proof:'.$actor['user_id'],10,900);
-        $this->db->tx(function()use($actor,$current,$target,$role,$d){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->system($actor,$current,true);$this->assignUserRole($target,$role,$d);$this->audit->add($actor['user_id'],'admin','access.user_role_'.$role,$target);});
+        (new \Morshed\Product\Contributions($this->db))->storage();$this->db->tx(function()use($actor,$current,$target,$role,$d){$this->db->one('SELECT id FROM m_installation WHERE id=1 FOR UPDATE');$this->system($actor,$current,true);$this->assignUserRole($target,$role,$d);if(isset($d['_atlas_present']))(new \Morshed\Product\Contributions($this->db))->atlasDecision($actor,'mentor',$target,($d['atlas_approved']??'')==='1');$this->audit->add($actor['user_id'],'admin','access.user_role_'.$role,$target);});
     }
     public function editUser(array $actor,string $current,string $target,array $d):void
     {

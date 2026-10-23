@@ -32,7 +32,7 @@ final class AtlasController
         if($this->realm!=='admin'||!$this->actor){throw new Problem('ACCESS_DENIED','مجوز مدیریت لازم است.',403);}
         $id='';if($path==='/atlas/logo'){
  (new Policy($this->db))->admin($this->actor,true);$id=Policy::text($d['id']??'',32);if(!$this->db->one('SELECT id FROM m_organizations WHERE id=?',[$id]))throw new Problem('NOT_FOUND','مجموعه پیدا نشد.',404);
- $extra=new \Morshed\Product\Contributions($this->db);$details=$extra->details($id);$asset=(new \Morshed\Product\ContentAssets($this->db,new \Morshed\Core\Audit($this->db)))->upload($this->actor,$_FILES['attachment']??[],false,true);$extra->saveDetails($id,[$asset,$details['website']??'',$details['social_urls']??'[]',$details['representative_id']??null,$details['representative_role']??'']);
+ $extra=new \Morshed\Product\Contributions($this->db);$details=$extra->details($id);$asset=(new \Morshed\Product\ContentAssets($this->db,new \Morshed\Core\Audit($this->db)))->upload($this->actor,$_FILES['attachment']??[],false,true,false,false,true);$extra->saveDetails($id,[$asset,$details['website']??'',$details['social_urls']??'[]',$details['representative_id']??null,$details['representative_role']??'']);
  }elseif($path==='/atlas/organization/save'){$id=$this->atlas->saveOrganization($this->actor,$d);}
         elseif($path==='/atlas/organization/merge'){$this->atlas->merge($this->actor,Policy::text($d['from']??'',32),Policy::text($d['into']??'',32));}
         else{$this->atlas->attribution($this->actor,$d);}

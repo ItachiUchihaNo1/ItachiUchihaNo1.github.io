@@ -1,0 +1,6 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const code=fs.readFileSync(process.argv[2]||'morshedapp.ir/assets/eitaa.js','utf8');
+async function run(granted,missing=false){let handler,submitted=false,events=[];const status={textContent:''},field={value:''},form={querySelector:s=>s==='[data-eitaa-contact-data]'?field:status,requestSubmit:()=>{submitted=true;events.push('submit');}},button={disabled:false,closest:()=>form,addEventListener:(_,fn)=>handler=fn};
+const app={platform:'android',initData:'',ready(){},requestContact(fn){events.push('contact');fn(true,{response:'signed-contact'});}};if(!missing)app.requestWriteAccess=fn=>{events.push('permission');fn(granted);};
+const window={Eitaa:{WebApp:app}},document={getElementById:()=>null,querySelectorAll:s=>s==='[data-eitaa-contact]'?[button]:[]};const ctx={window,document,console,Promise,URL,setTimeout,clearTimeout};vm.runInNewContext(code,ctx);await handler();assert.equal(submitted,true);assert.equal(field.value,'signed-contact');assert.deepEqual(events,missing?['contact','submit']:['permission','contact','submit']);}
+(async()=>{await run(true);await run(false);await run(false,true);console.log('PASS Eitaa permission precedes phone sharing; refusal/unsupported clients still complete phone flow');})().catch(e=>{console.error(e);process.exitCode=1;});

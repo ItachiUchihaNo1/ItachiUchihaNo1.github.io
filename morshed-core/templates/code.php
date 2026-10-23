@@ -12,3 +12,5 @@
 <a class="auth-back" href="<?= $this->h($this->url($purpose==='reset'?'/password/recover':($purpose==='change_phone'?($this->realm==='admin'?'/security':'/account'):'/login?method=otp'))) ?>"><?= $purpose==='change_phone'?'بازگشت و درخواست کد تازه':'اصلاح شماره یا بازگشت' ?></a>
 <p class="otp-safety">کد را با کسی به اشتراک نگذار. مرشد هیچ‌وقت کد ورودت را از تو نمی‌پرسد.</p>
 </section>
+
+<?php require __DIR__.'/eitaa-permission.php'; ?>

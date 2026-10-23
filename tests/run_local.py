@@ -21,7 +21,7 @@ def port():
 dbport,webport,adminport=port(),port(),port()
 processes=[];logs=[];checks=[]
 ini=scratch/'php.ini'
-ini.write_text('extension_dir="'+str(php.parent/'ext').replace('\\','/')+'"\nextension=pdo_mysql\nextension=openssl\nextension=curl\nextension=fileinfo\ndisplay_errors=0\nlog_errors=1\n',encoding='utf-8')
+ini.write_text('extension_dir="'+str(php.parent/'ext').replace('\\','/')+'"\nextension=pdo_mysql\nextension=openssl\nextension=curl\nextension=gd\nextension=fileinfo\ndisplay_errors=0\nlog_errors=1\n',encoding='utf-8')
 phpcmd=[str(php),'-c',str(ini)]
 token=secrets.token_hex(32)
 http_manual_password=secrets.token_urlsafe(24)
@@ -107,6 +107,7 @@ try:
     php_run('classification20.php')
     php_run('release21.php')
     php_run('release22.php')
+    php_run('release23.php')
     php_run('http_fixture_secret.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')

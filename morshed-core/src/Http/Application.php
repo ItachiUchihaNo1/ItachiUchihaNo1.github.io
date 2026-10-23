@@ -263,7 +263,7 @@ final class Application
             case '/users/edit':
                 $id=$this->queryString('id',32);$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at,status,created_at FROM m_users WHERE id=?',[$id]);
                 if(!$u){throw new Problem('NOT_FOUND','کاربر پیدا نشد.',404);}
-                $this->view->page('ویرایش اطلاعات کاربر','admin-user-edit',['user'=>$u,'profile'=>Profile::get($this->db,$id),'username'=>$this->accounts->username($id)??'','mentor'=>$this->db->one('SELECT status,accepted_at FROM m_mentors WHERE user_id=?',[$id])],$error);return;
+                $this->view->page('ویرایش اطلاعات کاربر','admin-user-edit',['user'=>$u,'profile'=>Profile::get($this->db,$id),'username'=>$this->accounts->username($id)??'','atlasApproved'=>(new \Morshed\Product\Contributions($this->db))->atlasVisible('mentor',$id),'mentor'=>$this->db->one('SELECT status,accepted_at FROM m_mentors WHERE user_id=?',[$id])],$error);return;
             case '/users':
                 $q=is_string($_GET['q']??null)?trim(substr($_GET['q'],0,160)):'';$page=max(1,min(10000,(int)($_GET['page']??1)));$offset=($page-1)*20;
                 $like='%'.strtr($q,['\\'=>'\\\\','%'=>'\\%','_'=>'\\_']).'%';
