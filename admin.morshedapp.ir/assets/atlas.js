@@ -36,7 +36,7 @@
     try {
       const file = map.dataset.province || 'provinces';
       if (!/^(provinces|osm-\d+)$/.test(file)) throw new Error('region');
-      const response = await fetch('/assets/geo/' + file + '.json', {cache:'force-cache'});
+      const response = await fetch('/assets/geo/' + file + '.json?v=22r', {cache:'force-cache'});
       if (!response.ok) throw new Error('map');
       const data = await response.json(), paths = [], markers = []; let x=Infinity,y=Infinity,maxX=-Infinity,maxY=-Infinity;
       for (const f of data.features) {

@@ -34,7 +34,6 @@ final class Application
         if(!is_string($raw)||strlen($raw)>200||!str_starts_with($raw,'/')||str_contains($raw,'..')){throw new Problem('NOT_FOUND','صفحه پیدا نشد.',404);}
         $this->path=$raw==='/index.php'?'/':$raw;$raw=$this->path;$this->api=str_starts_with($raw,'/api/v1/');if($this->api){$this->path=substr($raw,7);}
         $this->method=$_SERVER['REQUEST_METHOD']??'GET';
-        if($this->method==='POST'){$delivery=new \Morshed\Product\EitaaDelivery($this->db,$config);if($delivery->enabled()){$delivery->storage();if(($config['environment']??'')!=='testing')register_shutdown_function(static function()use($delivery){if(!function_exists('fastcgi_finish_request'))return;session_write_close();fastcgi_finish_request();try{$delivery->dispatch(3);}catch(\Throwable $e){error_log('Morshed: Eitaa delivery deferred');}});}}
 
         // Only ordinary public legacy GET pages redirect. Home app entry (including fragment initData) and auth callbacks never redirect.
         if($realm==='site'&&($config['pretty_urls']??false)&&$this->method==='GET'&&isset($_GET['r'])&&in_array($this->path,['/mentors','/experiences','/atlas','/organizations','/organization','/experience','/mentor/profile','/topics','/topic','/issues','/issue','/about'],true)&&!array_intersect(['hash','initData','init_data','tgWebAppData','eitaaWebAppData','state','code'],array_keys($_GET))){$q=$_GET;unset($q['r']);header('Location: '.$this->path.($q?'?'.http_build_query($q):''),true,301);exit;}
@@ -98,11 +97,17 @@ final class Application
         if(($protected||$this->path==='/account/complete')&&$this->needsEitaaPhone($this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$this->redirect('/account/identify');}throw new Problem('PHONE_REQUIRED','ابتدا شماره را تأیید کنید تا حساب قبلی شما شناسایی شود.',409);}if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
         if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=ReturnTo::current();$this->redirect($this->afterLogin());}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
     }
+    private function prepareEitaa():void
+    {
+        if(!$this->actor){return;}$delivery=new \Morshed\Product\EitaaDelivery($this->db,$this->config);if(!$delivery->enabled()){return;}
+        // External delivery is optional: a failed queue must never break login or core account actions.
+        try{$delivery->storage();if(($this->config['environment']??'')!=='testing')register_shutdown_function(static function()use($delivery){if(!function_exists('fastcgi_finish_request'))return;session_write_close();fastcgi_finish_request();try{$delivery->dispatch(3);}catch(\Throwable $e){error_log('Morshed: Eitaa delivery deferred');}});}catch(\Throwable $e){error_log('Morshed: Eitaa queue initialization unavailable');}
+    }
     public function run():void
     {
         try{
             $product=new ProductController($this->db,$this->view,$this->actor,$this->realm,$this->api);
-            if($this->method==='POST'){$this->csrf();$this->completedAccount();if(!$product->post($this->path,$this->input)){$this->post();}}
+            if($this->method==='POST'){$this->csrf();$this->completedAccount();$this->prepareEitaa();if(!$product->post($this->path,$this->input)){$this->post();}}
             elseif($this->method==='GET'){$this->completedAccount();if(!$product->get($this->path)){$this->get();}}
             else{throw new Problem('METHOD_NOT_ALLOWED','روش درخواست مجاز نیست.',405);}
         }catch(Problem $e){$this->error($e);}

@@ -394,6 +394,7 @@ try:
     subprocess.run([sys.executable,str(app/'tests/release21_http.py'),str(scratch)],check=True)
     subprocess.run([sys.executable,str(app/'tests/release22_http.py'),str(scratch)],check=True)
     subprocess.run([sys.executable,str(app/'tests/release22_clean_urls.py'),str(scratch)],check=True)
+    subprocess.run([sys.executable,str(app/'tests/release22_optional_queue.py'),str(scratch),str(php)],check=True)
     dumpbin=server.parent/('mariadb-dump.exe' if os.name=='nt' else 'mariadb-dump')
     if dumpbin.exists():
         dbname=cfg['database']['dsn'].split('dbname=')[1].split(';')[0];dumpfile=scratch/'private-test-backup.sql'

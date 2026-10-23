@@ -7,8 +7,11 @@ import ftplib, hashlib, io, json, os, re, ssl, sys, time, urllib.request
 ROOT=Path(__file__).resolve().parent.parent
 ALLOWED_ROOTS={'morshed-core','morshedapp.ir','admin.morshedapp.ir'}
 ALLOWED_EXT={'.php','.css','.js','.png','.webp','.woff2','.txt'}
+# Reviewed additive dependencies must reach hosts even when their parent release skipped them.
+REQUIRED_RUNTIME_FILES={'morshed-core/database/contributions.sql','morshed-core/database/eitaa-outbox.sql'}
 
 def allowed(name):
+    if name in REQUIRED_RUNTIME_FILES:return True
     if name=='morshed-core/database/migrations/007_profiles_and_experience_cases.sql':return True
     if name in {'morshed-core/database/classification20.sql','morshed-core/database/taxonomy17.sql','morshed-core/database/atlas15.sql','morshed-core/database/knowledge15.sql','morshed-core/data/iran-places.json'}:return True
     if re.fullmatch(r'(morshedapp\.ir|admin\.morshedapp\.ir)/assets/geo/(provinces|osm-[0-9]+)\.json',name):return True
@@ -34,9 +37,12 @@ def plan(root=ROOT):
             if p.is_file():
                 name=p.relative_to(root).as_posix()
                 if allowed(name) and not host_managed(name):files[name]=p.read_bytes()
-    for required in ['morshedapp.ir/index.php','morshedapp.ir/assets/app.css','morshedapp.ir/assets/product.js','morshed-core/bootstrap.php']:
+    for required in [*sorted(REQUIRED_RUNTIME_FILES),'morshedapp.ir/index.php','morshedapp.ir/assets/app.css','morshedapp.ir/assets/product.js','morshed-core/bootstrap.php']:
         if required not in files:raise ValueError('Incomplete deployment source')
     return files
+
+def incremental_files(files,changed):
+    return {name:data for name,data in files.items() if name in changed or name in REQUIRED_RUNTIME_FILES or name=='morshedapp.ir/_release.json'}
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 
@@ -190,7 +196,7 @@ def main():
             previous=json.loads(publisher.read(release_path))
             changed=changed_paths(previous.get('commit'),commit)
             if changed is not None:
-                selected={name:data for name,data in files.items() if name in changed or name=='morshedapp.ir/_release.json'}
+                selected=incremental_files(files,changed)
                 print('Verified successful base release; transferring '+str(len(selected))+' changed source files. Unchanged source, configuration and runtime files remain in place.',flush=True)
     except Exception:
         print('No verified incremental base; using the full reviewed source plan.',flush=True)

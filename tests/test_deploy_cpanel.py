@@ -52,6 +52,19 @@ class DeployTests(unittest.TestCase):
             ftp=FakeFTP();old=ftp.files.copy()
             with self.assertRaises(ValueError):deploy.Publisher(ftp,'/','a'*40).publish({path:b'replacement'},lambda _:None)
             self.assertEqual(old,ftp.files)
+    def test_runtime_sql_dependencies_are_in_the_reviewed_plan(self):
+        files=deploy.plan()
+        for source in (deploy.ROOT/'morshed-core/src').rglob('*.php'):
+            import re
+            for relative in re.findall(r"file_get_contents\(__DIR__\.'([^']+\.sql)'",source.read_text('utf-8')):
+                dependency=(source.parent/relative.lstrip('/')).resolve().relative_to(deploy.ROOT).as_posix()
+                self.assertIn(dependency,files,source.name+' runtime dependency missing')
+    def test_incremental_release_repairs_missing_runtime_dependencies(self):
+        files=deploy.plan();selected=deploy.incremental_files(files,{'morshed-core/src/Http/Application.php'})
+        for required in deploy.REQUIRED_RUNTIME_FILES:self.assertIn(required,selected)
+        self.assertNotIn('morshed-core/config/local.php',selected)
+        self.assertNotIn('morshed-core/database/install-new-database.sql',selected)
+
     def test_successful_publish_sets_public_644_and_preserves_private_data(self):
         ftp=FakeFTP();p=deploy.Publisher(ftp,'/','a'*40)
         p.publish({'morshedapp.ir/assets/app.css':b'new css','morshed-core/bootstrap.php':b'new core'},lambda files:self.assertEqual(ftp.files['/morshedapp.ir/assets/app.css'],b'new css'))
