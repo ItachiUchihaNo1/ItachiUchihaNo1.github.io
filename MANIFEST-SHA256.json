@@ -3,7 +3,7 @@
   "files": {
     ".github/workflows/deploy-cpanel.yml": "d8004eae7275503718a18c78bc1b8bad35d77d6c725f1744661352bcf0fdee48",
     ".gitignore": "c1145f96aee1992e178514f27734d30c8c41bb8940be5343fb10afc71aa451f0",
-    "admin.morshedapp.ir/.htaccess": "abd1a74b976fd62adf252dcc5c78188a399a809fc179a5b526c3a57025f068cb",
+    "admin.morshedapp.ir/.htaccess": "86d10a07fe69396cf3a111cbe43406635f3a95b0d36779e51a75c3df6e2af9ab",
     "admin.morshedapp.ir/assets/admin-places.js": "fff374264dafef6fe99d5857bc09d0d47a7022bb063bf02c6254491b82b51eed",
     "admin.morshedapp.ir/assets/app.css": "812e67c1f077fdc90c99b9c77ea294c6b0cdd67c750ec7caf64f93a68bf83417",
     "admin.morshedapp.ir/assets/app.js": "534050e38f524edd8658cf8321e5e857ca025f8d3383272a5fa11456ac00cf77",
@@ -260,7 +260,7 @@
     "morshed-core/templates/topic-card.php": "13ca778e5986a5890f72a071ecc21c2dc2e78eed6030f55ee9a9dac97417b2b2",
     "morshed-core/templates/topics.php": "a7c60eae8a8b484d4e02799c12ef11ba8343efda87c2f7d5f96faf9de07337b5",
     "morshed-core/templates/view-toggle.php": "a9a9d007c6c20d804f45d5c22eba8a26cfca49c9a40046092dc0789a635dd465",
-    "morshedapp.ir/.htaccess": "abd1a74b976fd62adf252dcc5c78188a399a809fc179a5b526c3a57025f068cb",
+    "morshedapp.ir/.htaccess": "86d10a07fe69396cf3a111cbe43406635f3a95b0d36779e51a75c3df6e2af9ab",
     "morshedapp.ir/assets/app.css": "812e67c1f077fdc90c99b9c77ea294c6b0cdd67c750ec7caf64f93a68bf83417",
     "morshedapp.ir/assets/app.js": "534050e38f524edd8658cf8321e5e857ca025f8d3383272a5fa11456ac00cf77",
     "morshedapp.ir/assets/atlas.css": "598230b8d7b7f0b59bf4e49e270e6ab1f2925ecfe4bfa81db7e48a7eb278c753",
