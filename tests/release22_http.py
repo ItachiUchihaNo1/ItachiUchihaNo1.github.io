@@ -5,7 +5,7 @@ exec((Path(__file__).parent/'consultations_http14.py').read_text('utf-8').split(
 guest=Client(cfg['origins']['site']);user=Client(cfg['origins']['site']);admin=Client(cfg['origins']['admin']);editor=Client(cfg['origins']['admin'])
 home=guest.get('/')
 assert 'header-account' not in home and 'ورود/ثبت نام' in home
-assert 'data-view-kind="experiences"' in home and 'data-view-toggle="mentors"' in home
+assert 'data-view-kind="experiences"' not in home and 'data-view-toggle="mentors"' not in home
 assert 'favicon-64.png' in home and 'rel="canonical"' in home
 for kind in ['experiences','mentors']:
  page=guest.get('/'+kind);assert 'data-view-toggle="'+kind+'"' in page and 'data-view-kind="'+kind+'"' in page

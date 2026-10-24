@@ -108,6 +108,7 @@ try:
     php_run('release21.php')
     php_run('release22.php')
     php_run('release23.php')
+    php_run('release24.php')
     php_run('http_fixture_secret.php')
     fixture=json.loads(Path(cfg['test_fixture_path']).read_text(encoding='utf-8'))
     replies=race(fixture['race_job']);assert any(x.get('code')=='INVALID_CODE' for x in replies);ok('two concurrent OTP verifications consume code only once')

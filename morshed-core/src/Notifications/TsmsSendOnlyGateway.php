@@ -20,6 +20,14 @@ final class TsmsSendOnlyGateway implements SmsGateway
     {
         $phone = self::normalizePhone($phone);
         if (!preg_match('/^[0-9]{4}$/D', $code)) { throw new \InvalidArgumentException('Invalid login code format.'); }
+        return $this->sendText($phone,"مرشد؛ کد ورود: ".$code."\nاین کد را به دیگران ندهید.");
+    }
+    public function sendMessage(string $phone,string $message):SmsSubmission
+    {
+        $phone=self::normalizePhone($phone);if(trim($message)===''||strlen($message)>12000||!preg_match('//u',$message))throw new \InvalidArgumentException('Invalid SMS message.');return $this->sendText($phone,$message);
+    }
+    private function sendText(string $phone,string $message):SmsSubmission
+    {
         // Both explicit opt-ins are private deployment settings, not request parameters.
         if (($this->config['enabled'] ?? false) !== true || ($this->config['https_transport_confirmed'] ?? $this->config['https_post_confirmed'] ?? false) !== true) {
             return new SmsSubmission('disabled');
@@ -39,7 +47,7 @@ final class TsmsSendOnlyGateway implements SmsGateway
         $fields = [
             'from' => $this->config['sender'], 'to' => $phone,
             'username' => $this->config['username'], 'password' => $this->config['password'],
-            'message' => "مرشد؛ کد ورود: " . $code . "\nاین کد را به دیگران ندهید.",
+            'message' => $message,
         ];
         try { $method=$this->config['method']??'POST';if(!in_array($method,['GET','POST'],true)){throw new \RuntimeException('Unsupported SMS transport.');}if($method==='GET'){if(!method_exists($this->transport,'getForm')){throw new \RuntimeException('SMS GET transport unavailable.');}$response=$this->transport->getForm(self::ENDPOINT,$fields);}else{$response=$this->transport->postForm(self::ENDPOINT, $fields);} }
         catch (\Throwable $e) { return new SmsSubmission('submission_uncertain'); }

@@ -15,6 +15,7 @@ if($system){
 $route=is_string($_GET['r']??null)?$_GET['r']:'/';
 ?>
 <a class="panel-nav-link" <?= $route==='/'?'aria-current="page"':'' ?> href="<?= $this->h($this->url('/')) ?>"><?= $this->icon('home') ?><span>داشبورد</span></a>
+<?php if($system): ?><a class="panel-nav-link" <?= in_array($route,['/messages','/eitaa-delivery'],true)?'aria-current="page"':'' ?> href="<?= $this->h($this->url('/messages')) ?>"><?= $this->icon('chat') ?><span>مرکز پیام‌ها</span></a><?php endif; ?>
 <?php foreach($groups as $groupTitle=>$links):$groupOpen=false;foreach($links as $target=>$label){[$base,$query]=array_pad(explode('?',$target,2),2,'');if($route===$base&&(!$query||str_contains($query,'kind='.($_GET['kind']??'topic')))){$groupOpen=true;}} ?>
 <details class="admin-nav-group" <?= $groupOpen?'open':'' ?>><summary><?= $this->h($groupTitle) ?></summary><div><?php foreach($links as $target=>$label):[$base,$query]=array_pad(explode('?',$target,2),2,'');$active=$route===$base&&(!$query||str_contains($query,'kind='.($_GET['kind']??'topic'))); ?><a class="panel-nav-link" <?= $active?'aria-current="page"':'' ?> href="<?= $this->h($this->url($target)) ?>"><?= $this->icon(match($base){'/security','/admins'=>'security','/users','/mentors'=>'users','/bookings'=>'calendar','/experiences','/archive'=>'book','/support'=>'chat',default=>'topic'}) ?><span><?= $this->h($label) ?></span></a><?php endforeach; ?></div></details>
 <?php endforeach; ?>
