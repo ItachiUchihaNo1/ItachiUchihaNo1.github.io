@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 0dbd567653440375c81f14a294b9081120f6a1c7
+          ref: 167ae050323c67effc4936c625dac4558b834350
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
