@@ -39,6 +39,7 @@ final class Application
         if($realm==='site'&&($config['pretty_urls']??false)&&$this->method==='GET'&&isset($_GET['r'])&&in_array($this->path,['/mentors','/experiences','/atlas','/organizations','/organization','/experience','/mentor/profile','/topics','/topic','/issues','/issue','/about'],true)&&!array_intersect(['hash','initData','init_data','tgWebAppData','eitaaWebAppData','state','code'],array_keys($_GET))){$q=$_GET;unset($q['r']);header('Location: '.$this->path.($q?'?'.http_build_query($q):''),true,301);exit;}
 
         if($this->method==='POST'){
+            if($path==='/chat/consent'&&$this->actor){$_GET['id']=$this->text('id',32);try{(new ProductController($this->db,$this->view,$this->actor,$this->realm,false))->get('/chat',$e->getMessage());return;}catch(Problem $ignored){}}
             if(str_starts_with(strtolower($_SERVER['CONTENT_TYPE']??''),'application/json')){
                 $limit=in_array($this->path,['/experience/save','/mentor/experience/save'],true)?524288:20000;$body=file_get_contents('php://input',false,null,0,$limit+1);if(strlen($body)>$limit){throw new Problem('TOO_LARGE','درخواست بیش از حد بزرگ است.',413);}
                 try{$decoded=json_decode($body,false,16,JSON_THROW_ON_ERROR);}catch(\Throwable $e){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}
@@ -93,7 +94,7 @@ final class Application
     private function completedAccount():void
     {
         if($this->realm!=='site'||!$this->actor){return;}
-        $protected=in_array($this->path,['/experience/submit','/meeting','/meeting/token','/account','/account/security','/account/profile','/account/rules','/account/phone','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
+        $protected=in_array($this->path,['/chat','/chat/poll','/chat/send','/chat/consent','/experience/submit','/meeting','/meeting/token','/account','/account/security','/account/profile','/account/rules','/account/phone','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
         if(($protected||$this->path==='/account/complete')&&$this->needsEitaaPhone($this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$this->redirect('/account/identify');}throw new Problem('PHONE_REQUIRED','ابتدا شماره را تأیید کنید تا حساب قبلی شما شناسایی شود.',409);}if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
         if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=ReturnTo::current();$this->redirect($this->afterLogin());}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
     }
