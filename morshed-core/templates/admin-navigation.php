@@ -12,7 +12,7 @@ if($system){
  $groups['تنظیمات سامانه']=['/general'=>'تنظیمات عمومی','/legal'=>'قوانین پایه','/notification-templates'=>'قالب اعلان','/notification-deliveries'=>'سوابق اعلان'];
  $groups['گزارش و نظارت']=['/reports'=>'گزارش‌ها','/audit'=>'حسابرسی'];
 }
-$route=is_string($_GET['r']??null)?$_GET['r']:'/';
+$route=is_string($_GET['r']??null)?$_GET['r']:(parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH)?:'/');$route=$route==='/index.php'?'/':$route;
 ?>
 <a class="panel-nav-link" <?= $route==='/'?'aria-current="page"':'' ?> href="<?= $this->h($this->url('/')) ?>"><?= $this->icon('home') ?><span>داشبورد</span></a>
 <?php if($system): ?><a class="panel-nav-link" <?= in_array($route,['/messages','/eitaa-delivery'],true)?'aria-current="page"':'' ?> href="<?= $this->h($this->url('/messages')) ?>"><?= $this->icon('chat') ?><span>مرکز پیام‌ها</span></a><?php endif; ?>

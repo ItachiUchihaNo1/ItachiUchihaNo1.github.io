@@ -416,6 +416,7 @@ echo "PASS all database rows restored and old authentication invalidated\nPASS c
         ok('local database backup restores every table exactly and invalidates snapshot authentication')
         ok('combined fresh installer imports successfully with all schema migrations')
     php_run('chat25.php')
+    php_run('queue26.php')
     (scratch/'http-results.json').write_text(json.dumps({'database_engine':version,'checks':checks},indent=2),encoding='utf-8')
     print('HTTP/RACE RESULT: '+str(len(checks))+' checks passed')
     if args.preview_seconds:

@@ -422,3 +422,15 @@ SELECT LEFT(SHA2(CONCAT('eitaa-permission24:',u.id),256),32),u.id,'دریافت 
 FROM m_users u JOIN m_auth_identities i ON i.user_id=u.id AND i.provider='eitaa'
 LEFT JOIN m_message_permissions p ON p.user_id=u.id
 WHERE u.status='active' AND p.user_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS m_message_schedule (
+ notification_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+ mode VARCHAR(12) NOT NULL,
+ send_after BIGINT NULL,
+ FOREIGN KEY(notification_id) REFERENCES m_notifications(id),
+ INDEX(mode,send_after)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS m_message_worker (
+ id TINYINT PRIMARY KEY,
+ last_run BIGINT NOT NULL
+) ENGINE=InnoDB;
