@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: 3c8cf808f36f46bb8c50781db9e6bbfb8f3134bd
+      NAMIRA_RELEASE_ID: 16a328f1534f34def5dc6912c3c913fa670fa2fc
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 3c8cf808f36f46bb8c50781db9e6bbfb8f3134bd
+          ref: 16a328f1534f34def5dc6912c3c913fa670fa2fc
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
