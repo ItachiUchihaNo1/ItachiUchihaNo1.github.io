@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: 64513662af89521d4cebc1c03e67e50a63df49ae
+      NAMIRA_RELEASE_ID: 7617ce023f9c339a789cf9913840d3d0529556d7
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 64513662af89521d4cebc1c03e67e50a63df49ae
+          ref: 7617ce023f9c339a789cf9913840d3d0529556d7
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
@@ -61,8 +61,14 @@ jobs:
                   assert r.status==200
                   return r.read(),r.headers
           html,_=get('/index.php?page=gallery');page=Page();page.feed(html.decode('utf-8'))
-          assert page.chips==['topic','geo_role','geo_country','geo_province','geo_county','geo_city','other'],page.chips
           state=json.loads(page.state);assert isinstance(state['count'],int) and state['count']>=0
+          expected=[c['key'] for c in state['facets']['chips']]
+          assert page.chips==expected and 'other' not in page.chips and len(page.chips)==len(set(page.chips)),page.chips
+          main=['topic','geo_role','geo_country','geo_province','geo_county','geo_city']
+          assert [key for key in page.chips if key in main]==[key for key in main if key in page.chips]
+          for axis in state['facets']['axes']:
+              if axis['options']:
+                  assert ('topic' if axis['axis_key']=='collection' else 'axis:'+axis['axis_key']) in page.chips
           for mode in ['preview','results']:
               raw,headers=get('/index.php?page=gallery-data&mode='+mode);data=json.loads(raw)
               assert data['ok'] and isinstance(data['count'],int) and data['count']>=0
@@ -81,5 +87,5 @@ jobs:
               raw,_=get('/assets/'+name+'?release='+os.environ.get('NAMIRA_RELEASE_ID','chips'))
               local=pathlib.Path('namira-source/namira/public/assets')/name
               assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
-          print('LIVE gallery seven chips, JSON routes, unique cards, validation and asset integrity verified. No records written.')
+          print('LIVE gallery dynamic direct chips, JSON routes, unique cards, validation and asset integrity verified. No records written.')
           PY
