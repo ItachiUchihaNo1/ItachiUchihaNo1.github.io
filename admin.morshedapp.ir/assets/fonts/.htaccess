@@ -1,0 +1,7 @@
+<IfModule mod_mime.c>
+AddType font/woff .woff
+</IfModule>
+<IfModule mod_expires.c>
+ExpiresActive On
+ExpiresByType font/woff "access plus 1 year"
+</IfModule>

@@ -24,9 +24,10 @@ final class ClassificationsController
     }
     public function post(string $path,array $d):bool
     {
-        if(!in_array($path,['/classification/catalog/save','/classification/proposal/review','/taxonomy/merge'],true)){return false;}$f=$this->access();$id='';
+        if(!in_array($path,['/classification/catalog/save','/classification/proposal/review','/taxonomy/merge','/taxonomy/delete'],true)){return false;}$f=$this->access();$id='';
         try{
             if($path==='/classification/catalog/save'){$kind=Policy::choice($d['kind']??'',['audiences','organization-types']);$id=$f->saveCatalog($this->actor,$kind,$d);$back='/'.$kind;}
+            elseif($path==='/taxonomy/delete'){if(($d['confirm_delete']??'')!=='1'){throw new Problem('INVALID_INPUT','تأیید حذف لازم است.');}$kind=(new Content($this->db,new \Morshed\Core\Audit($this->db)))->deleteTerm($this->actor,Policy::text($d['id']??'',32));$back='/taxonomy?kind='.$kind;}
             elseif($path==='/taxonomy/merge'){(new Knowledge($this->db))->mergeTerms($this->actor,Policy::text($d['from']??'',32),Policy::text($d['into']??'',32));$back='/taxonomy';}
             else{$f->reviewProposal($this->actor,$d);$back='/atlas/manage';}
         }catch(Problem $e){if($this->api){throw $e;}http_response_code($e->status);$this->view->old=$d;$this->view->page('اصلاح اطلاعات','classification-error',['message'=>$e->getMessage(),'input'=>$d,'retryPath'=>$path]);return true;}

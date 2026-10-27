@@ -125,7 +125,7 @@ final class AtlasData
         if($q!==''){$where=str_replace('v.title LIKE ?', '(v.title LIKE ? OR '.(new DiscoveryFilters($this->db))->textSql().')',$where);$prefixCount=count($args)-7-(!empty($d['mentor_id'])?1:0);array_splice($args,$prefixCount+1,0,[$pattern,$pattern]);}
         return $where;
     }
-    public function discover(array $d=[],bool $geographic=false):array
+    public function discover(array $d=[],bool $geographic=false,bool $regionsOnly=false):array
     {
         $this->storage();(new Classifications($this->db))->storage();(new Contributions($this->db))->storage();
         $layer=Policy::choice($d['layer']??'experiences',['experiences','organizations','mentors']);$page=Policy::integer($d['page']??1,1,10000);
@@ -140,6 +140,7 @@ final class AtlasData
         if($geographic){$where.=" AND $geoProvince IS NOT NULL";}
         if($province){$where.=" AND $geoProvince=?";$args[]=$province;}if($county){$where.=" AND $geoCounty=?";$args[]=$county;}
         $sql=$base.' WHERE '.$where;
+        if($regionsOnly){$region=$province?$geoCounty:$geoProvince;return $this->db->all("SELECT $region AS id,COUNT(DISTINCT $entity) AS total".$sql." GROUP BY $region",$args);}
         $total=(int)$this->db->run("SELECT COUNT(DISTINCT $entity)".$sql,$args)->fetchColumn();
         $summary=$this->db->one('SELECT COUNT(DISTINCT e.id) AS experiences,COUNT(DISTINCT e.mentor_id) AS mentors'.$sql,$args);
         $summary['organizations']=$layer==='organizations'?$total:(int)$this->db->run("SELECT COUNT(DISTINCT zo.id)".$base." JOIN m_experience_organizations zx ON zx.version_id=v.id AND zx.status='approved' JOIN m_organization_profiles zp ON zp.org_id=zx.org_id JOIN m_organizations zo ON zo.id=COALESCE(zp.merged_into,zx.org_id) AND zo.active=1 JOIN m_organization_profiles zt ON zt.org_id=zo.id AND zt.verified_at IS NOT NULL AND zt.merged_into IS NULL WHERE ".$where,$args)->fetchColumn();

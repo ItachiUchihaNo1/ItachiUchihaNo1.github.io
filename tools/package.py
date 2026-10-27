@@ -16,7 +16,7 @@ for dirname in ['morshed-core','morshedapp.ir','admin.morshedapp.ir','docs','tes
 expected_logo='ebe6121895542158ed5d21cf760e62e7ef2d4e4ea9e9019ba6642eae16ef064a'
 for public in ['morshedapp.ir','admin.morshedapp.ir']:
     if hashlib.sha256((root/public/'assets/morshed-logo.png').read_bytes()).hexdigest()!=expected_logo:raise SystemExit('Official logo bytes changed.')
-allowed={'.php','.sql','.json','.md','.png','.webp','.woff2','.txt','.css','.js','.html','.py','.cjs','.example','.yml'}
+allowed={'.php','.sql','.json','.md','.png','.webp','.woff','.woff2','.txt','.css','.js','.html','.py','.cjs','.example','.yml'}
 files=[]
 for path in sorted(root.rglob('*')):
     if not path.is_file():continue

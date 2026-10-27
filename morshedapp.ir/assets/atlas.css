@@ -5,3 +5,5 @@
 .atlas-filter-toggle{display:none}@media(max-width:700px){.atlas-filter-toggle{display:flex;align-items:center;justify-content:space-between;font-weight:700;min-height:44px}.atlas-filters h2{display:none}.atlas-filters form{padding-top:18px}}
 
 .atlas-map path[data-level=populated]{fill:#e0ece6}.atlas-presence{fill:#d73939;stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke;cursor:pointer}.atlas-presence:focus,.atlas-presence:hover{fill:#9e1c1c;outline:none;stroke:#092c3b}
+
+.atlas-presence[data-kind=experiences]{fill:#d73939}.atlas-presence[data-kind=mentors]{fill:#2166d1}.atlas-presence[data-kind=organizations]{fill:#8742b5}.atlas-presence:hover,.atlas-presence:focus{stroke:#092c3b;stroke-width:3}.atlas-legend{display:flex;flex-wrap:wrap;gap:18px;font-size:13px}.atlas-legend span{display:inline-flex;align-items:center;gap:7px}.atlas-legend span:before{content:'';width:10px;height:10px;border-radius:50%;background:#d73939}.atlas-legend .mentor:before{background:#2166d1}.atlas-legend .organization:before{background:#8742b5}.taxonomy-delete{margin-block:16px}.taxonomy-delete button{background:#fff0ed;color:#982e23;border:1px solid #e5aaa1}
