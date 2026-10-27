@@ -417,6 +417,7 @@ echo "PASS all database rows restored and old authentication invalidated\nPASS c
         ok('combined fresh installer imports successfully with all schema migrations')
     php_run('chat25.php')
     php_run('queue26.php')
+    php_run('release27.php')
     for log_name in ['site.log','admin.log']:
         assert 'Undefined variable $path' not in (scratch/log_name).read_text(encoding='utf-8',errors='replace'),'POST initialization emitted an unexpected warning'
     (scratch/'http-results.json').write_text(json.dumps({'database_engine':version,'checks':checks},indent=2),encoding='utf-8')

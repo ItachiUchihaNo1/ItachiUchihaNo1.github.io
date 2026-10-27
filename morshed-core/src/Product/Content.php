@@ -28,6 +28,30 @@ final class Content
             $this->audit->add($a['user_id'],'admin','taxonomy.saved',$id);return $id;
         });
     }
+    /** Delete only unused vocabulary. Historical experience links and graph evidence remain intact. */
+    public function deleteTerm(array $a,string $id):string
+    {
+        if(!Security::validId($id)){throw new Problem('INVALID_INPUT','شناسه معتبر نیست.');}
+        $this->policy->admin($a);(new Taxonomy($this->db))->storage();(new Knowledge($this->db))->storage();
+        return $this->write($a,false,function()use($a,$id){
+            $term=$this->db->one('SELECT * FROM m_terms WHERE id=? FOR UPDATE',[$id]);
+            if(!$term){throw new Problem('NOT_FOUND','مورد پیدا نشد.',404);}
+            $used=$this->db->one("SELECT id FROM m_terms WHERE parent_id=? LIMIT 1",[$id]);
+            foreach(['m_experience_versions','m_experience_topics','m_experience_issues','m_problem_tags','m_mentor_terms','m_term_redirects'] as $table){
+                $condition=$table==='m_term_redirects'?'source_id=? OR target_id=?':'term_id=?';
+                if($this->db->one("SELECT 1 FROM $table WHERE $condition LIMIT 1",$table==='m_term_redirects'?[$id,$id]:[$id])){$used=true;}
+            }
+            if($this->db->one('SELECT id FROM m_knowledge_relations WHERE from_id=? OR to_id=? LIMIT 1',[$id,$id])||$this->db->one('SELECT id FROM m_store_versions WHERE blocks_json LIKE ? LIMIT 1',['%'.$id.'%'])){$used=true;}
+            if($used){throw new Problem('TERM_IN_USE','این مورد به تجربه، مرشد، زیرموضوع یا سوابق سامانه متصل است. برای حفظ اطلاعات، ابتدا از ادغام با مورد درست یا غیرفعال‌کردن استفاده کنید.',409);}
+            foreach(['m_term_icons','m_term_metadata','m_term_aliases'] as $table){$this->db->run("DELETE FROM $table WHERE term_id=?",[$id]);}
+            $this->db->run('DELETE FROM m_issue_topics WHERE issue_id=? OR topic_id=?',[$id,$id]);
+            $this->db->run('DELETE FROM m_topic_paths WHERE ancestor_id=? OR descendant_id=?',[$id,$id]);
+            $this->db->run("DELETE FROM m_knowledge_entities WHERE entity_type IN ('TOPIC','ISSUE') AND source_id=?",[$id]);
+            $this->db->run('DELETE FROM m_terms WHERE id=?',[$id]);
+            $this->audit->add($a['user_id'],'admin','taxonomy.deleted',$id);
+            return $term['kind'];
+        });
+    }
     public function invite(array $a,array $d):string
     {return $this->write($a,true,function()use($a,$d){$uid=$d['user_id']??'';if(!$this->db->one("SELECT id FROM m_users WHERE id=? AND status='active'",[$uid])){throw new Problem('NOT_FOUND','ابتدا کاربر باید حساب تأییدشده داشته باشد.',404);}
         if($this->db->one('SELECT user_id FROM m_mentors WHERE user_id=?',[$uid])){throw new Problem('CONFLICT','این کاربر قبلاً دعوت شده است.',409);}

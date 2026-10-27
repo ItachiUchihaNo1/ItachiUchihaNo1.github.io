@@ -23,9 +23,11 @@
   const map = document.querySelector('[data-atlas-map]');
   if (!map) return;
   const svg = map.querySelector('svg'), status = map.querySelector('[data-map-status]'), retry = map.querySelector('[data-map-retry]');
-  const counts = new Map(JSON.parse(map.dataset.regions).map(r => [r.id, Number(r.total)]));
+  const labels={experiences:'تجربه',mentors:'مرشد',organizations:'مجموعه'}, layers=Object.entries(JSON.parse(map.dataset.layers||'{}')).map(([kind,rows])=>({kind,counts:new Map(rows.map(r=>[r.id,Number(r.total)]))}));
+  const counts=new Map();for(const layer of layers)for(const [id,total] of layer.counts)counts.set(id,(counts.get(id)||0)+total);
   const ns = 'http://www.w3.org/2000/svg';
-  const choose = id => {
+  const choose = (id,kind) => {
+    if(kind)form.querySelector('[name="layer"]').value=kind;
     if (map.dataset.province) county.value = id; else { province.value = id; county.value = ''; }
     form.requestSubmit();
   };
@@ -49,7 +51,7 @@
         path.setAttribute('d', d);path.setAttribute('tabindex','0');path.setAttribute('role','button');path.setAttribute('fill-rule','evenodd');
         path.setAttribute('aria-label',f.properties.name+'، '+count.toLocaleString('fa-IR')+' نتیجه');path.dataset.level=count?'populated':'empty';
         const title=document.createElementNS(ns,'title');title.textContent=path.getAttribute('aria-label');path.append(title);
-        path.addEventListener('click',()=>choose(f.id));path.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(f.id);}});paths.push(path);x=Math.min(x,left);y=Math.min(y,top);maxX=Math.max(maxX,right);maxY=Math.max(maxY,bottom);if(count){const dot=document.createElementNS(ns,'circle');const marker=regionPoint(polygons,left,top,right,bottom);dot.setAttribute('cx',marker[0]);dot.setAttribute('cy',marker[1]);dot.setAttribute('r',map.dataset.province?'.045':'.12');dot.setAttribute('class','atlas-presence');dot.setAttribute('aria-label',path.getAttribute('aria-label')+'؛ نشانگر منطقه، نه نشانی دقیق');dot.setAttribute('role','button');dot.setAttribute('tabindex','0');const caption=document.createElementNS(ns,'title');caption.textContent=dot.getAttribute('aria-label');dot.append(caption);dot.addEventListener('click',()=>choose(f.id));dot.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(f.id);}});markers.push(dot);}
+        path.addEventListener('click',()=>choose(f.id));path.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(f.id);}});paths.push(path);x=Math.min(x,left);y=Math.min(y,top);maxX=Math.max(maxX,right);maxY=Math.max(maxY,bottom);if(count){const present=layers.filter(layer=>layer.counts.get(f.id));present.forEach((layer,index)=>{const dot=document.createElementNS(ns,'circle');const spread=(index-(present.length-1)/2)*(map.dataset.province?.13:.34);const marker=regionPoint(polygons,left+spread,top,right+spread,bottom);dot.setAttribute('cx',marker[0]);dot.setAttribute('cy',marker[1]);dot.setAttribute('r',map.dataset.province?'.045':'.12');dot.setAttribute('class','atlas-presence');dot.dataset.kind=layer.kind;dot.setAttribute('aria-label',f.properties.name+'، '+layer.counts.get(f.id).toLocaleString('fa-IR')+' '+labels[layer.kind]+'؛ نشانگر منطقه');dot.setAttribute('role','button');dot.setAttribute('tabindex','0');const caption=document.createElementNS(ns,'title');caption.textContent=dot.getAttribute('aria-label');dot.append(caption);dot.addEventListener('click',()=>choose(f.id,layer.kind));dot.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(f.id,layer.kind);}});markers.push(dot);});}
       }
       if (!Number.isFinite(x)) throw new Error('empty geometry');
       svg.setAttribute('viewBox',`${x-.1} ${y-.1} ${maxX-x+.2} ${maxY-y+.2}`);svg.replaceChildren(...paths,...markers);svg.removeAttribute('hidden');status.hidden=true;
