@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: 16a328f1534f34def5dc6912c3c913fa670fa2fc
+      NAMIRA_RELEASE_ID: 638d8eb0d88d31e62e9659bb395021ee9a45c254
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 16a328f1534f34def5dc6912c3c913fa670fa2fc
+          ref: 638d8eb0d88d31e62e9659bb395021ee9a45c254
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
@@ -34,3 +34,52 @@ jobs:
       - name: Deploy only Namira to its own document root
         run: python3 namira-source/namira/deploy/ftps.py
 
+
+      - name: Verify live gallery chips and read-only JSON API
+        run: |
+          python3 - <<'PY'
+          import json, hashlib, pathlib, os
+          from html.parser import HTMLParser
+          from urllib.request import urlopen, Request
+          from urllib.error import HTTPError
+          BASE='https://test.shahidpics.com'
+          class Page(HTMLParser):
+              def __init__(self):
+                  super().__init__();self.chips=[];self.state='';self.in_state=False;self.images=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='button' and 'data-filter-chip' in a:self.chips.append(a['data-filter-chip'])
+                  if tag=='script' and a.get('id')=='gallery-filter-state':self.in_state=True
+                  if tag=='a' and 'page=image&' in a.get('href',''):self.images.append(a['href'])
+              def handle_endtag(self,tag):
+                  if tag=='script':self.in_state=False
+              def handle_data(self,data):
+                  if self.in_state:self.state+=data
+          
+          def get(path):
+              with urlopen(Request(BASE+path,headers={'Accept':'application/json,text/html','User-Agent':'Namira-gallery-release-check'}),timeout=30) as r:
+                  assert r.status==200
+                  return r.read(),r.headers
+          html,_=get('/index.php?page=gallery');page=Page();page.feed(html.decode('utf-8'))
+          assert page.chips==['topic','geo_role','geo_country','geo_province','geo_county','geo_city','other'],page.chips
+          state=json.loads(page.state);assert isinstance(state['count'],int) and state['count']>=0
+          for mode in ['preview','results']:
+              raw,headers=get('/index.php?page=gallery-data&mode='+mode);data=json.loads(raw)
+              assert data['ok'] and isinstance(data['count'],int) and data['count']>=0
+              assert 'application/json' in headers.get('Content-Type','') and 'no-store' in headers.get('Cache-Control','')
+              assert isinstance(data['facets']['axes'],list) and set(data['facets']['geo'])=={'country','province','county','city'}
+              if mode=='results':
+                  p=Page();p.feed(data['html']);assert len(p.images)==len(set(p.images)) and len(p.images)<=24
+                  assert len(p.images)==min(data['count'],24)
+              print('LIVE gallery '+mode+' JSON verified; images='+str(data['count']))
+          try:
+              get('/index.php?page=gallery-data&geo_role=unknown-role')
+              raise AssertionError('Expected validation rejection')
+          except HTTPError as e:
+              assert e.code==422 and json.loads(e.read())['ok'] is False
+          for name in ['gallery-filters.css','gallery-filters.js']:
+              raw,_=get('/assets/'+name+'?release='+os.environ.get('NAMIRA_RELEASE_ID','chips'))
+              local=pathlib.Path('namira-source/namira/public/assets')/name
+              assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
+          print('LIVE gallery seven chips, JSON routes, unique cards, validation and asset integrity verified. No records written.')
+          PY
