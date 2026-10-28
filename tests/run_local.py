@@ -418,6 +418,11 @@ echo "PASS all database rows restored and old authentication invalidated\nPASS c
     php_run('chat25.php')
     php_run('queue26.php')
     php_run('release27.php')
+    php_run('membership28.php')
+    php_run('membership28_http_fixture.php')
+    subprocess.run([sys.executable,str(app/'tests/membership28_http.py'),str(scratch)],check=True)
+    php_run('membership28_race_fixture.php')
+    subprocess.run([sys.executable,str(app/'tests/membership28_race.py'),str(scratch),str(php)],check=True)
     for log_name in ['site.log','admin.log']:
         assert 'Undefined variable $path' not in (scratch/log_name).read_text(encoding='utf-8',errors='replace'),'POST initialization emitted an unexpected warning'
     (scratch/'http-results.json').write_text(json.dumps({'database_engine':version,'checks':checks},indent=2),encoding='utf-8')

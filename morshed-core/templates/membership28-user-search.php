@@ -1,0 +1,1 @@
+<form method="get" action="<?= $this->h($this->url($screen)) ?>"><?php if(!($this->config['pretty_urls']??false)): ?><input type="hidden" name="r" value="<?= $this->h($screen) ?>"><?php endif; ?><label>جست‌وجوی حساب با نام<input name="q" maxlength="160" value="<?= $this->h($_GET['q']??'') ?>"></label><button class="secondary">پیداکردن حساب</button></form>

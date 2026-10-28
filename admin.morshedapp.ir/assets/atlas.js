@@ -3,7 +3,7 @@
   const form = document.querySelector('[data-atlas-filters]');
   if (!form) return;
   const panel = document.querySelector('[data-filter-panel]'), mobile = matchMedia('(max-width:700px)');
-  if (panel) { panel.open = !mobile.matches; mobile.addEventListener('change',()=>{panel.open=!mobile.matches;}); }
+  if (panel) { panel.open = !mobile.matches; mobile.addEventListener('change',()=>{panel.open=form.classList.contains('pill-filter-form')||!mobile.matches;}); }
   const province = form.querySelector('[data-province]'), county = form.querySelector('[data-county]');
   let request = 0;
   province.addEventListener('change', async () => {

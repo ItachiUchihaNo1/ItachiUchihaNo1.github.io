@@ -6,3 +6,5 @@
 <?php if($sections): ?><aside class="reading-sidebar"><nav class="reading-toc" aria-label="فهرست بخش‌های تجربه"><h2>در این تجربه می‌خوانید</h2><div><?php foreach($sections as $key=>$label): ?><a href="#reading-<?= $key ?>"><?= $label ?></a><?php endforeach; ?></div></nav></aside><?php endif; ?></div></article>
 <?php require __DIR__.'/experience-classification-details.php'; ?>
 <?php if(!empty($related)): ?><section class="section"><div class="results-heading"><h2>تجربه‌های دیگری برای خواندن</h2><a href="<?= $this->h($this->url('/experiences')) ?>">همهٔ تجربه‌ها</a></div><div class="discovery-grid"><?php foreach($related as $row){require __DIR__.'/experience-card.php';} ?></div></section><?php endif; ?>
+
+<?php if($assets): ?><section class="card section"><h2>پیوست‌های تجربه</h2><?php foreach($assets as $asset): ?><a class="textlink" href="<?= $this->h($this->url('/content/asset?id='.$asset['id'])) ?>"><?= $this->h($asset['display_name']) ?><?= !$this->actor&&!in_array($asset['media_type'],['image/png','image/jpeg','image/webp'],true)?' · ورود برای دریافت پیوست':'' ?></a><?php endforeach; ?></section><?php endif; ?>

@@ -1,0 +1,5 @@
+<?php
+require __DIR__.'/common.php';
+$f=json_decode(file_get_contents(dirname($argv[1]).'/membership28-fixture.json'),true);$out=[];
+foreach(['user','host','manager'] as $role){$uid=$f[$role]['user_id'];Morshed\Identity\Profile::save($db,$uid,['first_name'=>'کاربر','last_name'=>'آزمون '.$role,'province'=>'قم','city'=>'قم','gender'=>'male']);$db->run('UPDATE m_users SET password_hash=? WHERE id=?',[Morshed\Core\Security::hashPassword($cfg['test_manual_password']),$uid]);$db->run("INSERT IGNORE INTO m_auth_identities VALUES(?,?,'local_username',?,?)",[Morshed\Core\Security::id(),$uid,'t28_'.substr($uid,0,12),time()]);$out[$role]=$sessions->issue($uid,'site','otp')['token'];}
+$out['admin']=$sessions->issue($f['admin']['user_id'],'admin','admin_password',$f['admin']['admin_id'])['token'];$out['fixture']=$f;$db->run('UPDATE m_service_policy SET enabled=1 WHERE id=1');file_put_contents(dirname($argv[1]).'/membership28-http-auth.json',json_encode($out));echo 'PASS isolated HTTP fixture ready';

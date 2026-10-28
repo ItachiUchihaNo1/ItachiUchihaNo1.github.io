@@ -1,0 +1,1 @@
+(()=>{'use strict';const selector=document.querySelector('[data-saved-problem]'),fields=document.querySelector('[data-new-problem]');if(selector&&fields){const update=()=>{fields.disabled=Boolean(selector.value);};selector.addEventListener('change',update);update();}})();

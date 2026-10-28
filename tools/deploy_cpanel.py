@@ -8,7 +8,7 @@ ROOT=Path(__file__).resolve().parent.parent
 ALLOWED_ROOTS={'morshed-core','morshedapp.ir','admin.morshedapp.ir'}
 ALLOWED_EXT={'.php','.css','.js','.png','.webp','.woff','.woff2','.txt'}
 # Reviewed additive dependencies must reach hosts even when their parent release skipped them.
-REQUIRED_RUNTIME_FILES={'morshed-core/database/contributions.sql','morshed-core/database/eitaa-outbox.sql'}
+REQUIRED_RUNTIME_FILES={'morshed-core/database/membership28.sql','morshed-core/database/contributions.sql','morshed-core/database/eitaa-outbox.sql'}
 
 def allowed(name):
     if name in REQUIRED_RUNTIME_FILES:return True

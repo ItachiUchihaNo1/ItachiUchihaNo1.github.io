@@ -42,12 +42,13 @@ final class Catalog
     public function mentors(array $rows):array
     {
         if(!$rows){return [];}$ids=array_values(array_unique(array_column($rows,'user_id')));$marks=implode(',',array_fill(0,count($ids),'?'));
+        (new Membership($this->db))->storage();$admissions=array_column($this->db->all("SELECT mentor_id,accept_novices FROM m_mentor_admission WHERE mentor_id IN ($marks)",$ids),'accept_novices','mentor_id');
         $cities=\Morshed\Core\Upgrade::ready($this->db)?array_column($this->db->all("SELECT user_id,city FROM m_user_profiles WHERE user_id IN ($marks)",$ids),'city','user_id'):[];
         $counts=[];
         $talks=array_column($this->db->all("SELECT mentor_id,COUNT(*) AS total FROM m_bookings WHERE mentor_id IN ($marks) AND state='completed' GROUP BY mentor_id",$ids),'total','mentor_id');
         $versions=$this->db->all("SELECT e.mentor_id,v.id FROM m_experiences e JOIN m_experience_versions v ON v.id=e.public_version_id AND v.experience_id=e.id WHERE e.mentor_id IN ($marks)",$ids);$labels=(new Taxonomy($this->db))->labels(array_column($versions,'id'));$tags=[];foreach($versions as $version){$counts[$version['mentor_id']]=($counts[$version['mentor_id']]??0)+1;foreach($labels[$version['id']]['issues']??[] as $tag){$tags[$version['mentor_id']][$tag['id']]=$tag;}}
         foreach($rows as &$row){
-            $id=$row['user_id'];$row['city']=$cities[$id]??'';$row['experience_count']=(int)($counts[$id]??0);$row['conversation_count']=(int)($talks[$id]??0);$row['issue_tags']=array_values($tags[$id]??[]);
+            $id=$row['user_id'];$row['accept_novices']=(bool)($admissions[$id]??1);$row['city']=$cities[$id]??'';$row['experience_count']=(int)($counts[$id]??0);$row['conversation_count']=(int)($talks[$id]??0);$row['issue_tags']=array_values($tags[$id]??[]);
         }unset($row);return $rows;
     }
     public function experiences(array $rows):array

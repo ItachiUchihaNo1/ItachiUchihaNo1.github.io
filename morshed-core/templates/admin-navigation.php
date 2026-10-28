@@ -10,6 +10,7 @@ if($system){
  $groups['کاربران و جلسات']=['/users'=>'کاربران','/bookings'=>'جلسات','/experience-leads'=>'پیشنهادهای تجربه','/support'=>'درخواست‌های پشتیبانی','/archives'=>'مجوزهای آرشیو','/organizations'=>'عضویت عملیاتی'];
  $groups['حساب کاربری مدیریت']+=['/admins'=>'دسترسی مدیران','/settings'=>'وضعیت اتصال‌ها'];
  $groups['تنظیمات سامانه']=['/general'=>'تنظیمات عمومی','/legal'=>'قوانین پایه','/notification-templates'=>'قالب اعلان','/notification-deliveries'=>'سوابق اعلان'];
+ $groups['عضویت و مشاوره']=['/membership/policy'=>'سیاست‌های عضویت و اعتبار','/membership/reviews'=>'احراز و عضویت مجموعه‌ها','/membership/networks'=>'شبکه‌ها و تفویض اختیار','/membership/credits'=>'اعطای اعتبار','/membership/behavior'=>'رسیدگی رفتاری','/membership/reports'=>'گزارش خدمات'];
  $groups['گزارش و نظارت']=['/reports'=>'گزارش‌ها','/audit'=>'حسابرسی'];
 }
 $route=is_string($_GET['r']??null)?$_GET['r']:(parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH)?:'/');$route=$route==='/index.php'?'/':$route;

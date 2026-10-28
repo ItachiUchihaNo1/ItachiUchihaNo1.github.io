@@ -40,7 +40,7 @@ final class Application
 
         if($this->method==='POST'){
             if(str_starts_with(strtolower($_SERVER['CONTENT_TYPE']??''),'application/json')){
-                $limit=in_array($this->path,['/experience/save','/mentor/experience/save'],true)?524288:20000;$body=file_get_contents('php://input',false,null,0,$limit+1);if(strlen($body)>$limit){throw new Problem('TOO_LARGE','درخواست بیش از حد بزرگ است.',413);}
+                $limit=in_array($this->path,['/experience/save','/mentor/experience/save'],true)?524288:(in_array($this->path,['/account/problems/save','/bookings/create','/bookings/internal','/booking/clarify','/booking/reply'],true)?65536:20000);$body=file_get_contents('php://input',false,null,0,$limit+1);if(strlen($body)>$limit){throw new Problem('TOO_LARGE','درخواست بیش از حد بزرگ است.',413);}
                 try{$decoded=json_decode($body,false,16,JSON_THROW_ON_ERROR);}catch(\Throwable $e){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}
                 if(!is_object($decoded)){throw new Problem('INVALID_JSON','ساختار درخواست معتبر نیست.');}$this->input=(array)$decoded;
             }else{$this->input=$_POST;}
@@ -93,7 +93,7 @@ final class Application
     private function completedAccount():void
     {
         if($this->realm!=='site'||!$this->actor){return;}
-        $protected=in_array($this->path,['/chat','/chat/poll','/chat/send','/chat/consent','/experience/submit','/meeting','/meeting/token','/account','/account/security','/account/profile','/account/rules','/account/phone','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
+        $protected=(str_starts_with($this->path,'/account/')&&!in_array($this->path,['/account/complete','/account/identify'],true))||str_starts_with($this->path,'/community/')||str_starts_with($this->path,'/behavior/')||in_array($this->path,['/chat','/chat/poll','/chat/send','/chat/consent','/experience/submit','/meeting','/meeting/token','/account','/account/security','/account/profile','/account/rules','/account/phone','/mentor','/sessions','/support','/support/create','/ticket','/ticket/reply','/booking','/bookings/create','/session','/feedback'],true)||str_starts_with($this->path,'/booking/')||str_starts_with($this->path,'/session/')||(str_starts_with($this->path,'/mentor/')&&$this->path!=='/mentor/profile');
         if(($protected||$this->path==='/account/complete')&&$this->needsEitaaPhone($this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$this->redirect('/account/identify');}throw new Problem('PHONE_REQUIRED','ابتدا شماره را تأیید کنید تا حساب قبلی شما شناسایی شود.',409);}if(!$protected){return;}$user=$this->db->one('SELECT password_hash FROM m_users WHERE id=?',[$this->actor['user_id']]);
         if(!$user['password_hash']||!$this->accounts->username($this->actor['user_id'])||!Profile::complete($this->db,$this->actor['user_id'])){if(!$this->api&&$this->method==='GET'){$_SESSION['return_to']=ReturnTo::current();$this->redirect($this->afterLogin());}throw new Problem('ACCOUNT_INCOMPLETE','ابتدا اطلاعات حساب، نام کاربری و رمز عبور را تکمیل کنید.',409);}
     }
