@@ -6,13 +6,15 @@ use Morshed\Core\{Database,Audit,Problem};
 final class ChatRooms {
  public function __construct(private Database $db){}
  private function booking(array $a,string $id):array {
+  (new Policy($this->db))->user($a);
   $b=(new Consultations($this->db,new Audit($this->db)))->booking($a,$id);
+  if(!in_array($a['user_id'],[$b['user_id'],$b['mentor_id']],true))throw new Problem('ACCESS_DENIED','این اتاق متعلق به شما نیست.',403);
   if(($b['requested_method']??'')!=='chat')throw new Problem('CHAT_NOT_SELECTED','روش این جلسه چت متنی نیست.',409);
   return $b;
  }
  public function consentInfo(array $a,string $id):?array {
-  $this->booking($a,$id);$v=$this->db->one("SELECT v.id,v.title,v.body FROM m_legal_publications p JOIN m_legal_versions v ON v.id=p.version_id AND v.document_key='recording' WHERE p.document_key='recording'");
-  if($v)$v['accepted']=(bool)$this->db->one('SELECT user_id FROM m_user_acceptances WHERE user_id=? AND version_id=?',[$a['user_id'],$v['id']]);return $v;
+  $b=$this->booking($a,$id);$v=$this->db->one("SELECT v.id,v.title,v.body FROM m_legal_publications p JOIN m_legal_versions v ON v.id=p.version_id AND v.document_key='recording' WHERE p.document_key='recording'");
+  if($v){$accepted=array_column($this->db->all('SELECT user_id FROM m_user_acceptances WHERE version_id=? AND user_id IN (?,?)',[$v['id'],$b['user_id'],$b['mentor_id']]),'user_id');$v['accepted']=in_array($a['user_id'],$accepted,true);$v['other_accepted']=in_array($a['user_id']===$b['user_id']?$b['mentor_id']:$b['user_id'],$accepted,true);}return $v;
  }
  public function consent(array $a,string $id,string $version):void {
   $this->db->tx(function()use($a,$id,$version){$p=$this->db->one("SELECT version_id FROM m_legal_publications WHERE document_key='recording' FOR UPDATE");$this->booking($a,$id);if(!$p||!$p['version_id']||!hash_equals($p['version_id'],$version))throw new Problem('LEGAL_VERSION_CHANGED','شرایط تغییر کرده است؛ متن تازه را بخوانید.',409);$this->db->run('INSERT IGNORE INTO m_user_acceptances VALUES(?,?,?)',[$a['user_id'],$version,time()]);(new Audit($this->db))->add($a['user_id'],'site','chat.archive_consent',$id);});

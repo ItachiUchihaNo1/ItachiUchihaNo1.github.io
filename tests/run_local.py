@@ -272,8 +272,8 @@ try:
     status,body,_=site.request('/api/v1/me');assert json.loads(body)['user']['id']==fixture['user_id'];ok('profile ignores injected ownership/role and escapes stored HTML')
     for path in ['/bookings','/sessions/join','/sessions/archive','/oauth/google','/auth/eitaa']:
         status,body,_=site.post(path,{});assert status==503,(path,status,body)
-    status,body,_=adminclient.post('/legal/recording/publish',{});assert status==503,(status,body)
-    ok('booking media archive external auth and recording publication remain server-blocked')
+    status,body,_=adminclient.post('/legal/recording/publish',{});assert status==400 and 'CONSENT_REQUIRED' in body,(status,body)
+    ok('legacy media endpoints stay blocked; chat policy publication requires explicit administrator confirmation')
     status,body,_=site.post('/auth/otp/request',{'phone':sample_phone('contact3'),'purpose':'login'});assert status==503 and 'SMS_UNAVAILABLE' in body
     assert 'challenge_id' not in body;ok('disabled SMS cannot fake successful code delivery')
     for client in [site,adminclient]:
@@ -423,6 +423,8 @@ echo "PASS all database rows restored and old authentication invalidated\nPASS c
     subprocess.run([sys.executable,str(app/'tests/membership28_http.py'),str(scratch)],check=True)
     php_run('membership28_race_fixture.php')
     subprocess.run([sys.executable,str(app/'tests/membership28_race.py'),str(scratch),str(php)],check=True)
+    php_run('chat29_fixture.php')
+    subprocess.run([sys.executable,str(app/'tests/chat29_http.py'),str(scratch),str(php)],check=True)
     for log_name in ['site.log','admin.log']:
         assert 'Undefined variable $path' not in (scratch/log_name).read_text(encoding='utf-8',errors='replace'),'POST initialization emitted an unexpected warning'
     (scratch/'http-results.json').write_text(json.dumps({'database_engine':version,'checks':checks},indent=2),encoding='utf-8')

@@ -9,7 +9,7 @@ if($system){
  $groups['محتوا و ویترین']+=['/mentors'=>'مرشدها','/atlas/manage'=>'مجموعه‌ها و اطلس','/knowledge'=>'روابط و فراداده'];
  $groups['کاربران و جلسات']=['/users'=>'کاربران','/bookings'=>'جلسات','/experience-leads'=>'پیشنهادهای تجربه','/support'=>'درخواست‌های پشتیبانی','/archives'=>'مجوزهای آرشیو','/organizations'=>'عضویت عملیاتی'];
  $groups['حساب کاربری مدیریت']+=['/admins'=>'دسترسی مدیران','/settings'=>'وضعیت اتصال‌ها'];
- $groups['تنظیمات سامانه']=['/general'=>'تنظیمات عمومی','/legal'=>'قوانین پایه','/notification-templates'=>'قالب اعلان','/notification-deliveries'=>'سوابق اعلان'];
+ $groups['تنظیمات سامانه']=['/general'=>'تنظیمات عمومی','/legal'=>'قوانین و شرایط چت','/notification-templates'=>'قالب اعلان','/notification-deliveries'=>'سوابق اعلان'];
  $groups['عضویت و مشاوره']=['/membership/policy'=>'سیاست‌های عضویت و اعتبار','/membership/reviews'=>'احراز و عضویت مجموعه‌ها','/membership/networks'=>'شبکه‌ها و تفویض اختیار','/membership/credits'=>'اعطای اعتبار','/membership/behavior'=>'رسیدگی رفتاری','/membership/reports'=>'گزارش خدمات'];
  $groups['گزارش و نظارت']=['/reports'=>'گزارش‌ها','/audit'=>'حسابرسی'];
 }
