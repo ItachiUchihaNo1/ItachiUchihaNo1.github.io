@@ -1,0 +1,50 @@
+name: Namira read-only request diagnostics
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/namira-diagnostics.yml']
+permissions:
+  contents: read
+jobs:
+  request-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - name: Inspect request HTTP response and bounded sanitized PHP log tail
+        run: |
+          python3 - <<'PY'
+          import os,ssl,ftplib,re
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          try:
+              with urlopen(Request('https://test.shahidpics.com/index.php?page=request',headers={'User-Agent':'Namira-read-only-diagnostics'}),timeout=30) as r: print('REQUEST_HTTP_STATUS',r.status)
+          except HTTPError as e: print('REQUEST_HTTP_STATUS',e.code)
+          ftp=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=40)
+          ftp.connect(os.environ['DEPLOY_FTPS_HOST'],21)
+          ftp.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD'])
+          ftp.prot_p();ftp.cwd('Public_html/new')
+          for path in ['error_log','_namira/error_log','_namira/storage/error.log']:
+              try:
+                  ftp.voidcmd('TYPE I');size=ftp.size(path)
+                  if not size:continue
+                  data=bytearray()
+                  def collect(chunk):
+                      data.extend(chunk)
+                      if len(data)>70000:raise RuntimeError('Bounded log read exceeded')
+                  ftp.retrbinary('RETR '+path,collect,blocksize=8192,rest=max(0,size-65536) or None)
+                  text=data.decode('utf-8','replace')
+                  matches=[]
+                  for line in text.splitlines():
+                      if 'request.php' in line and 'Undefined variable $db' in line:matches.append('Undefined variable $db in request.php')
+                      if 'request.php' in line and 'MemberSchema::ready' in line and ('null' in line or 'PDO' in line):matches.append('MemberSchema::ready received invalid/null PDO from request.php')
+                  print('LOG_TAIL',path,'MATCHES',len(matches))
+                  for message in sorted(set(matches)):print('SANITIZED_PHP_TRACE',message)
+              except ftplib.error_perm:print('LOG_NOT_FOUND_OR_DENIED',path)
+          ftp.quit()
+          print('READ_ONLY_DIAGNOSTICS_COMPLETE: no server files or records changed; no raw logs or credentials printed.')
+          
+          PY
