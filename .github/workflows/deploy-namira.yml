@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: b5e799eb35cbad404af95368cc48ff3d51dfa016
+      NAMIRA_RELEASE_ID: 344e589f51ec004e0becd2398dd302440b376aee
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: b5e799eb35cbad404af95368cc48ff3d51dfa016
+          ref: 344e589f51ec004e0becd2398dd302440b376aee
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
@@ -83,7 +83,7 @@ jobs:
               raise AssertionError('Expected validation rejection')
           except HTTPError as e:
               assert e.code==422 and json.loads(e.read())['ok'] is False
-          for name in ['gallery-filters.css','gallery-filters.js','simple-martyr.css','simple-martyr.js']:
+          for name in ['gallery-filters.css','gallery-filters.js','simple-martyr.css','simple-martyr.js','protocol.js']:
               raw,_=get('/assets/'+name+'?release='+os.environ.get('NAMIRA_RELEASE_ID','chips'))
               local=pathlib.Path('namira-source/namira/public/assets')/name
               assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
