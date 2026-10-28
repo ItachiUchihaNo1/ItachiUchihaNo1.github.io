@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: d2e188031b502ce8d65365ddc8ec8ae5c741c9da
+      NAMIRA_RELEASE_ID: 313e21f0252805b7e744de1e51dece7424b5f8e8
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: d2e188031b502ce8d65365ddc8ec8ae5c741c9da
+          ref: 313e21f0252805b7e744de1e51dece7424b5f8e8
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
@@ -83,9 +83,19 @@ jobs:
               raise AssertionError('Expected validation rejection')
           except HTTPError as e:
               assert e.code==422 and json.loads(e.read())['ok'] is False
-          for name in ['gallery-filters.css','gallery-filters.js','simple-martyr.css','simple-martyr.js','protocol.js']:
+          for name in ['gallery-filters.css','gallery-filters.js','simple-martyr.css','simple-martyr.js','protocol.js','storefront.css','storefront.js','participation.css','participation.js']:
               raw,_=get('/assets/'+name+'?release='+os.environ.get('NAMIRA_RELEASE_ID','chips'))
               local=pathlib.Path('namira-source/namira/public/assets')/name
               assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
+          home_html,_=get('/index.php?page=home')
+          home_text=home_html.decode('utf-8')
+          assert 'data-home-topics' in home_text and 'data-home-results' in home_text
+          raw,headers=get('/index.php?page=home-data&topic=0')
+          home=json.loads(raw);assert home['ok'] and home['count']==state['count']
+          hp=Page();hp.feed(home['html']);assert len(hp.images)==len(set(hp.images)) and len(hp.images)==min(home['count'],24)
+          assert 'application/json' in headers.get('Content-Type','') and 'no-store' in headers.get('Cache-Control','')
+          login,_=get('/index.php?page=member-login')
+          assert 'سرویس پیامکی هنوز فراهم نشده'.encode('utf-8') in login
+          print('LIVE managed storefront, home topic JSON and unavailable real SMS state verified; no accounts or records written.')
           print('LIVE gallery dynamic direct chips, JSON routes, unique cards, validation and asset integrity verified. No records written.')
           PY
