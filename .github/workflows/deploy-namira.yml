@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: 313e21f0252805b7e744de1e51dece7424b5f8e8
+      NAMIRA_RELEASE_ID: cfd840d988d110270b494b577f18eb26c2579fb9
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 313e21f0252805b7e744de1e51dece7424b5f8e8
+          ref: cfd840d988d110270b494b577f18eb26c2579fb9
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
@@ -83,7 +83,7 @@ jobs:
               raise AssertionError('Expected validation rejection')
           except HTTPError as e:
               assert e.code==422 and json.loads(e.read())['ok'] is False
-          for name in ['gallery-filters.css','gallery-filters.js','simple-martyr.css','simple-martyr.js','protocol.js','storefront.css','storefront.js','participation.css','participation.js']:
+          for name in ['gallery-filters.css','gallery-filters.js','simple-martyr.css','simple-martyr.js','protocol.js','storefront.css','storefront.js','participation.css','participation.js','theme.css','public-ui.css','account-ui.js','reference-v2.css','application.css','admin.css','community.css','protocol.css']:
               raw,_=get('/assets/'+name+'?release='+os.environ.get('NAMIRA_RELEASE_ID','chips'))
               local=pathlib.Path('namira-source/namira/public/assets')/name
               assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
@@ -94,8 +94,24 @@ jobs:
           home=json.loads(raw);assert home['ok'] and home['count']==state['count']
           hp=Page();hp.feed(home['html']);assert len(hp.images)==len(set(hp.images)) and len(hp.images)==min(home['count'],24)
           assert 'application/json' in headers.get('Content-Type','') and 'no-store' in headers.get('Cache-Control','')
-          login,_=get('/index.php?page=member-login')
+          login,_=get('/index.php?page=member-login&mode=otp')
           assert 'سرویس پیامکی هنوز فراهم نشده'.encode('utf-8') in login
+          request_html,_=get('/index.php?page=request')
+          request_text=request_html.decode('utf-8')
+          assert 'name="mobile"' in request_text and 'name="password"' in request_text
+          assert 'ورود / ثبت‌نام' in request_text and 'سرویس موقتاً در دسترس نیست' not in request_text
+          assert '/assets/theme.css?v=008' in home_text and 'header-account' in home_text
+          artists,_=get('/index.php?page=artists')
+          assert 'هنرمندان نامیرا'.encode('utf-8') in artists
+          geography,_=get('/index.php?page=account-geography&province=0')
+          assert json.loads(geography)==[]
+          if hp.images:
+              image_html,_=get(hp.images[0]);image_text=image_html.decode('utf-8')
+              assert 'شهدا و افراد مرتبط با اثر' not in image_text
+              assert 'پیش‌نمایش برای نمایش سبک شده است' not in image_text
+              assert 'شرایط استفاده و انتساب اثر هنوز توسط مدیر تکمیل نشده است' not in image_text
+              assert 'page=profile' in image_text
+          print('LIVE red theme assets, guest account header, safe mobile/password login, request route without503, artists and public geography verified.')
           print('LIVE managed storefront, home topic JSON and unavailable real SMS state verified; no accounts or records written.')
           print('LIVE gallery dynamic direct chips, JSON routes, unique cards, validation and asset integrity verified. No records written.')
           PY
