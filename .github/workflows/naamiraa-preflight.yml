@@ -1,0 +1,50 @@
+name: Inspect Naamiraa hosting destinations
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - name: Read domain, database capability and destination metadata only
+        run: |
+          python3 - <<'PY'
+          import os,ssl,json,socket,io,hashlib,base64,urllib.request,urllib.parse
+          from ftplib import FTP_TLS,error_perm
+          host=os.environ['DEPLOY_FTPS_HOST'];user=os.environ['DEPLOY_FTPS_USER'];password=os.environ['DEPLOY_FTPS_PASSWORD'];ctx=ssl.create_default_context()
+          def api(module,function,params={}):
+              url='https://'+host+':2083/execute/'+module+'/'+function+'?'+urllib.parse.urlencode(params)
+              auth=base64.b64encode((user+':'+password).encode()).decode()
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url,headers={'Authorization':'Basic '+auth}),context=ctx,timeout=25) as r: data=json.load(r)
+                  result=data.get('result',{});return {'ok':result.get('status')==1,'data':result.get('data')} if result.get('status')==1 else {'ok':False,'reason':'API function denied'}
+              except Exception as e: return {'ok':False,'reason':type(e).__name__,'status':getattr(e,'code',None)}
+          for domain in ['naamiraa.ir','admin.naamiraa.ir']:
+              result=api('DomainInfo','single_domain_data',{'domain':domain});d=result.get('data') or {};print('DOMAIN '+json.dumps({'domain':domain,'api_ok':result['ok'],'reason':result.get('reason'),'documentroot':d.get('documentroot'),'servername':d.get('servername')},ensure_ascii=False))
+              try:
+                  print('DNS '+domain+' '+json.dumps(socket.gethostbyname_ex(domain)))
+                  with urllib.request.urlopen(urllib.request.Request('https://'+domain,headers={'User-Agent':'Naamiraa-read-only-preflight'}),context=ctx,timeout=25) as r:
+                      import re
+                      html=r.read(200000).decode('utf-8',errors='replace');t=re.search('<title>(.*?)</title>',html,re.S|re.I);print('HTTPS '+json.dumps({'domain':domain,'status':r.status,'title':t.group(1) if t else None,'namira':'نامیرا' in html}))
+              except Exception as e: print('HTTPS_UNAVAILABLE '+domain+' '+type(e).__name__+' '+str(getattr(e,'code','')))
+          result=api('Mysql','list_databases');print('CPANEL_MYSQL_API '+json.dumps({'ok':result['ok'],'reason':result.get('reason'),'status':result.get('status')}))
+          f=FTP_TLS(context=ctx,timeout=45);f.connect(host,21);f.login(user,password);f.prot_p();home=f.pwd()
+          for folder in ['public_html','admin.naamiraa.ir']:
+              f.cwd(home)
+              try:
+                  f.cwd(folder);listing=[{'name':n,'type':m.get('type'),'size':m.get('size')} for n,m in f.mlsd() if n not in ('.','..')];print('FTP_ROOT '+json.dumps({'folder':folder,'exists':True,'entries':listing[:35]},ensure_ascii=False))
+                  try:
+                      b=io.BytesIO();f.retrbinary('RETR index.php',b.write);raw=b.getvalue();print('ENTRY '+json.dumps({'folder':folder,'sha256':hashlib.sha256(raw).hexdigest(),'namira':b'Namira\\Web::run' in raw,'bytes':len(raw)}))
+                  except error_perm: print('ENTRY '+folder+' missing')
+              except error_perm: print('FTP_ROOT '+json.dumps({'folder':folder,'exists':False}))
+          f.quit()
+          PY
