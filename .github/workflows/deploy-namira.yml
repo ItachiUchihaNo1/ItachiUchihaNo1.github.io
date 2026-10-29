@@ -40,6 +40,25 @@ jobs:
           assert data['head_sha']=='f761afc6ddff0b26876081827f7d3df4e949ef29' and data['conclusion']=='success', 'Exact-source Namira CI must succeed before upload'
           print('Exact source CI confirmed: PHP/MySQL, calls browser, store and mobile navigation.')
           PY
+      - name: Diagnose test subdomain and verify hosting origin without bypassing TLS
+        run: |
+          python3 - <<'PY'
+          import socket,os,ssl,urllib.request,json,subprocess
+          host='test.shahidpics.com';origin=socket.gethostbyname(os.environ['DEPLOY_FTPS_HOST'])
+          try: public=socket.gethostbyname_ex(host);print('PUBLIC_DNS '+json.dumps(public))
+          except socket.gaierror as e: print('PUBLIC_DNS_UNAVAILABLE '+str(e))
+          for query in [('NS','shahidpics.com'),('A',host),('AAAA',host),('CNAME',host)]:
+              try:
+                  r=subprocess.run(['dig','@1.1.1.1',query[1],query[0],'+noall','+comments','+answer','+authority','+time=3','+tries=1'],capture_output=True,text=True,timeout=5)
+                  print('DNS_QUERY '+query[0]+' '+query[1]+' '+r.stdout.strip())
+              except Exception as e: print('DNS_QUERY_UNAVAILABLE '+type(e).__name__)
+          old=socket.getaddrinfo
+          def resolve(name,port,*args,**kwargs): return old(origin if name==host else name,port,*args,**kwargs)
+          socket.getaddrinfo=resolve
+          with urllib.request.urlopen(urllib.request.Request('https://'+host+'/index.php?page=home',headers={'User-Agent':'Namira-origin-read-only-check'}),timeout=35,context=ssl.create_default_context()) as r:
+              html=r.read().decode('utf-8');assert r.status==200 and 'نامیرا' in html and 'Fatal error:' not in html
+          print('ORIGIN_VHOST_VERIFIED '+origin+' HTTPS200; original domain SNI, Host and certificate validation preserved.')
+          PY
       - name: Deploy only Namira to its own document root
         run: python3 namira-source/namira/deploy/ftps.py
 
