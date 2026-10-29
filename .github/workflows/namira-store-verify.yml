@@ -1,0 +1,57 @@
+name: Verify Namira store deployment read only
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/namira-store-verify.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 674780cf3bf488a96f05362cce6c537067e01f89
+          path: namira-source
+          persist-credentials: false
+      - name: Check public responses and exact release assets without writes
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib,re,time
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          BASE='https://test.shahidpics.com'
+          def get(path):
+              try:
+                  with urlopen(Request(BASE+path,headers={'User-Agent':'Namira-store-release-check','Cache-Control':'no-cache'}),timeout=35) as r:
+                      return r.status,r.read(),dict(r.headers)
+              except HTTPError as e:
+                  return e.code,e.read(),dict(e.headers)
+          failed=[]
+          for path in ['/index.php?page=home','/index.php?page=gallery','/index.php?page=shop','/index.php?page=store-info','/assets/gallery-filters.css','/assets/store.css','/assets/store.js']:
+              status,body,headers=get(path)
+              row={'path':path,'status':status,'bytes':len(body),'type':headers.get('Content-Type'),'server':headers.get('Server')}
+              if status not in (200,503): row['body']=re.sub('<[^>]+>',' ',body.decode('utf-8','replace'))[:350]
+              if path.startswith('/assets/') and status==200:
+                  local=pathlib.Path('namira-source/namira/public')/path.lstrip('/')
+                  row['hash_match']=hashlib.sha256(body).digest()==hashlib.sha256(local.read_bytes()).digest()
+                  if not row['hash_match']:failed.append(path)
+              if path=='/index.php?page=store-info':
+                  print('STORE_MIGRATION_PENDING' if status==503 else 'STORE_PUBLIC_ROUTE_READY' if status==200 else 'STORE_ROUTE_FAILED')
+              elif status!=200:failed.append(path)
+              if path=='/index.php?page=shop' and status==200:
+                  html=body.decode('utf-8')
+                  print('STORE_NEW_TEMPLATE='+str('store.js' in html))
+              print(json.dumps(row,ensure_ascii=False))
+              time.sleep(1)
+          for path in ['/_namira/.env.example','/assets/gallery-filters.css?release=674780cf','/assets/gallery-filters.css?release=674780cf3bf488a96f05362cce6c537067e01f89']:
+              status,body,h=get(path);print(json.dumps({'diagnostic':path,'status':status,'server':h.get('Server')}))
+              if path.startswith('/_namira/') and status!=403:failed.append(path)
+              time.sleep(1)
+          assert not failed,failed
+          print('STORE_READ_ONLY_VERIFICATION_PASSED')
+          
+          PY
