@@ -1,0 +1,34 @@
+name: Verify Naamiraa HTTPS document roots
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-mapping.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+      NAAMIRAA_DB_PASSWORD: ${{ secrets.NAAMIRAA_DB_PASSWORD }}
+    steps:
+      - name: Verify document root mapping with disposable non-sensitive nonce files
+        run: |
+          python3 - <<'PY'
+          import os,ssl,io,secrets,json,uuid
+          from ftplib import FTP_TLS
+          from urllib.request import Request,urlopen
+          print('DATABASE_SECRET_PRESENT '+str(bool(os.environ.get('NAAMIRAA_DB_PASSWORD'))))
+          f=FTP_TLS(context=ssl.create_default_context(),timeout=45);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();home=f.pwd()
+          for folder,domain in [('public_html','naamiraa.ir'),('admin.naamiraa.ir','admin.naamiraa.ir')]:
+              f.cwd(home);f.cwd(folder);name='_namira-map-'+uuid.uuid4().hex+'.txt';content=secrets.token_hex(32).encode();f.storbinary('STOR '+name,io.BytesIO(content))
+              try:
+                  with urlopen(Request('https://'+domain+'/'+name,headers={'User-Agent':'Naamiraa-root-mapping','Cache-Control':'no-cache'}),timeout=30,context=ssl.create_default_context()) as r: status=r.status;matched=r.read()==content
+                  print('ROOT_MAPPING '+json.dumps({'domain':domain,'folder':folder,'http':status,'matched':matched}))
+              except Exception as e: print('ROOT_MAPPING '+json.dumps({'domain':domain,'folder':folder,'http':getattr(e,'code',None),'matched':False,'error':type(e).__name__}))
+              finally:f.delete(name)
+          f.quit()
+          PY
