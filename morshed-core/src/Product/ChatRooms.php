@@ -25,7 +25,7 @@ final class ChatRooms {
   elseif($now<(int)$b['starts_at'])$reason='گفت‌وگو در ساعت رزروشده آغاز می‌شود.';
   elseif($now>=(int)$b['ends_at'])$reason='زمان جلسه پایان یافته است؛ تاریخچهٔ پیام‌ها در دسترس شماست.';
   else{try{(new Consultations($this->db,new Audit($this->db)))->writable($a,$id);$allowed=true;$reason='گفت‌وگو فعال است.';}catch(Problem $e){$reason=$e->getMessage();$code=$e->errorCode;}}
-  return ['booking'=>$b,'can_send'=>$allowed,'reason'=>$reason,'block_code'=>$code,'server_time'=>$now,'starts_at'=>(int)$b['starts_at'],'ends_at'=>(int)$b['ends_at']];
+  return ['booking'=>$b,'booking_state'=>$b['state'],'can_send'=>$allowed,'reason'=>$reason,'block_code'=>$code,'server_time'=>$now,'starts_at'=>(int)$b['starts_at'],'ends_at'=>(int)$b['ends_at']];
  }
  private function dto(array $a,array $rows):array {return array_map(fn($r)=>['id'=>(int)$r['id'],'body'=>$r['body'],'created_at'=>(int)$r['created_at'],'own'=>$r['sender_id']===$a['user_id']],$rows);}
  public function read(array $a,string $id,int $after=0,int $before=0,bool $initial=false):array {
