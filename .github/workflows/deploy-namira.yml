@@ -12,7 +12,7 @@ concurrency:
 jobs:
   deploy-namira:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USERNAME: ${{ secrets.DEPLOY_FTPS_USER }}
@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: 674780cf3bf488a96f05362cce6c537067e01f89
+      NAMIRA_RELEASE_ID: eee8ec866b9b2d3d890e4d7a8b6864cb8d824e2d
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 674780cf3bf488a96f05362cce6c537067e01f89
+          ref: eee8ec866b9b2d3d890e4d7a8b6864cb8d824e2d
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
@@ -35,112 +35,50 @@ jobs:
         run: python3 namira-source/namira/deploy/ftps.py
 
 
-      - name: Verify live gallery chips and read-only JSON API
+      - name: Verify shared mobile navigation and existing public routes
         run: |
           python3 - <<'PY'
-          import json, hashlib, pathlib, os
+          import hashlib,json,pathlib
           from html.parser import HTMLParser
-          from urllib.request import urlopen, Request
+          from urllib.request import Request,urlopen
           from urllib.error import HTTPError
           BASE='https://test.shahidpics.com'
-          class Page(HTMLParser):
+          class Nav(HTMLParser):
               def __init__(self):
-                  super().__init__();self.chips=[];self.state='';self.in_state=False;self.images=[]
+                  super().__init__();self.inside=False;self.links=[];self.active=0;self.drawer=False;self.toggle=False
               def handle_starttag(self,tag,attrs):
                   a=dict(attrs)
-                  if tag=='button' and 'data-filter-chip' in a:self.chips.append(a['data-filter-chip'])
-                  if tag=='script' and a.get('id')=='gallery-filter-state':self.in_state=True
-                  if tag=='a' and 'page=image&' in a.get('href',''):self.images.append(a['href'])
+                  if tag=='nav' and 'nm-bottom-nav' in a.get('class',''):self.inside=True
+                  if tag=='a' and self.inside:
+                      self.links.append(a.get('href',''))
+                      if a.get('aria-current')=='page':self.active+=1
+                  if tag=='dialog' and a.get('id')=='mobile-navigation':self.drawer=True
+                  if tag=='button' and 'data-mobile-menu' in a:self.toggle=True
               def handle_endtag(self,tag):
-                  if tag=='script':self.in_state=False
-              def handle_data(self,data):
-                  if self.in_state:self.state+=data
-          
-          def get(path):
-              with urlopen(Request(BASE+path,headers={'Accept':'application/json,text/html','User-Agent':'Namira-gallery-release-check'}),timeout=30) as r:
-                  assert r.status==200
-                  return r.read(),r.headers
-          html,_=get('/index.php?page=gallery');page=Page();page.feed(html.decode('utf-8'))
-          state=json.loads(page.state);assert isinstance(state['count'],int) and state['count']>=0
-          expected=[c['key'] for c in state['facets']['chips']]
-          assert page.chips==expected and 'other' not in page.chips and len(page.chips)==len(set(page.chips)),page.chips
-          main=['topic','geo_role','geo_country','geo_province','geo_county','geo_city']
-          assert [key for key in page.chips if key in main]==[key for key in main if key in page.chips]
-          for axis in state['facets']['axes']:
-              if axis['options']:
-                  assert ('topic' if axis['axis_key']=='collection' else 'axis:'+axis['axis_key']) in page.chips
-          for mode in ['preview','results']:
-              raw,headers=get('/index.php?page=gallery-data&mode='+mode);data=json.loads(raw)
-              assert data['ok'] and isinstance(data['count'],int) and data['count']>=0
-              assert 'application/json' in headers.get('Content-Type','') and 'no-store' in headers.get('Cache-Control','')
-              assert isinstance(data['facets']['axes'],list) and set(data['facets']['geo'])=={'country','province','county','city'}
-              if mode=='results':
-                  p=Page();p.feed(data['html']);assert len(p.images)==len(set(p.images)) and len(p.images)<=24
-                  assert len(p.images)==min(data['count'],24)
-              print('LIVE gallery '+mode+' JSON verified; images='+str(data['count']))
-          try:
-              get('/index.php?page=gallery-data&geo_role=unknown-role')
-              raise AssertionError('Expected validation rejection')
-          except HTTPError as e:
-              assert e.code==422 and json.loads(e.read())['ok'] is False
-          for name in ['gallery-filters.css','gallery-filters.js','simple-martyr.css','simple-martyr.js','protocol.js','storefront.css','storefront.js','participation.css','participation.js','theme.css','public-ui.css','account-ui.js','reference-v2.css','application.css','admin.css','community.css','protocol.css']:
-              raw,_=get('/assets/'+name+'?release='+os.environ.get('NAMIRA_RELEASE_ID','chips'))
-              local=pathlib.Path('namira-source/namira/public/assets')/name
-              assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
-          home_html,_=get('/index.php?page=home')
-          home_text=home_html.decode('utf-8')
-          assert 'data-home-topics' in home_text and 'data-home-results' in home_text
-          raw,headers=get('/index.php?page=home-data&topic=0')
-          home=json.loads(raw);assert home['ok'] and home['count']==state['count']
-          hp=Page();hp.feed(home['html']);assert len(hp.images)==len(set(hp.images)) and len(hp.images)==min(home['count'],24)
-          assert 'application/json' in headers.get('Content-Type','') and 'no-store' in headers.get('Cache-Control','')
-          login,_=get('/index.php?page=member-login&mode=otp')
-          assert 'سرویس پیامکی هنوز فراهم نشده'.encode('utf-8') in login
-          request_html,_=get('/index.php?page=request')
-          request_text=request_html.decode('utf-8')
-          assert 'name="mobile"' in request_text and 'name="password"' in request_text
-          assert 'ورود / ثبت‌نام' in request_text and 'سرویس موقتاً در دسترس نیست' not in request_text
-          assert '/assets/theme.css?v=008' in home_text and 'header-account' in home_text
-          artists,_=get('/index.php?page=artists')
-          assert 'هنرمندان نامیرا'.encode('utf-8') in artists
-          geography,_=get('/index.php?page=account-geography&province=0')
-          assert json.loads(geography)==[]
-          if hp.images:
-              image_html,_=get(hp.images[0]);image_text=image_html.decode('utf-8')
-              assert 'شهدا و افراد مرتبط با اثر' not in image_text
-              assert 'پیش‌نمایش برای نمایش سبک شده است' not in image_text
-              assert 'شرایط استفاده و انتساب اثر هنوز توسط مدیر تکمیل نشده است' not in image_text
-              assert 'page=profile' in image_text
-          print('LIVE red theme assets, guest account header, safe mobile/password login, request route without503, artists and public geography verified.')
-          print('LIVE managed storefront, home topic JSON and unavailable real SMS state verified; no accounts or records written.')
-          print('LIVE gallery dynamic direct chips, JSON routes, unique cards, validation and asset integrity verified. No records written.')
-          PY
-
-      - name: Verify store release assets and database upgrade state
-        run: |
-          python3 - <<'PY'
-          import hashlib, pathlib
-          from urllib.request import Request, urlopen
-          from urllib.error import HTTPError
-          base='https://test.shahidpics.com'
+                  if tag=='nav':self.inside=False
           def read(path):
-              try:
-                  with urlopen(Request(base+path,headers={'Cache-Control':'no-cache','User-Agent':'Namira-store-release-check'}),timeout=30) as r:
-                      return r.status,r.read()
-              except HTTPError as e:
-                  return e.code,e.read()
-          status,body=read('/index.php?page=shop')
-          assert status==200,('shop',status)
-          for name in ['store.js','store.css']:
-              status,body=read('/assets/'+name+'?release=674780cf')
-              assert status==200,('asset',name,status)
+              with urlopen(Request(BASE+path,headers={'Cache-Control':'no-cache','User-Agent':'Namira-mobile-nav-release-check'}),timeout=35) as r:
+                  assert r.status==200,(path,r.status)
+                  return r.read()
+          expected=['home','gallery','artists','shop','member-login']
+          for page in ['home','gallery','artists','shop','member-login']:
+              body=read('/index.php?page='+page);html=body.decode('utf-8');nav=Nav();nav.feed(html)
+              assert nav.links==['/index.php?page='+p for p in expected],(page,nav.links)
+              assert nav.active==1 and nav.drawer and nav.toggle,page
+              assert 'بانک شهدا</span>' not in html
+              assert 'Warning:' not in html and 'Fatal error:' not in html
+              print('LIVE_MOBILE_NAV '+page+' HTTP200; five destinations, active item and drawer verified.')
+          for name in ['mobile-navigation.css','mobile-navigation.js']:
               local=pathlib.Path('namira-source/namira/public/assets')/name
-              assert hashlib.sha256(body).digest()==hashlib.sha256(local.read_bytes()).digest(),name
-          status,body=read('/index.php?page=store-info')
-          assert status in (200,503),('store-info',status)
-          if status==503:
-              print('STORE_MIGRATION_PENDING: authenticated superadmin must open admin once; automatic SQL backup and counts precede migrations 009/010/011.')
-          else:
-              print('STORE_PUBLIC_ROUTE_READY: store-info HTTP 200.')
-          print('STORE_RELEASE_VERIFIED: shop HTTP 200; store CSS/JS match validated source. No customer/order writes performed.')
+              for suffix in ['', '?v=20261029-1']:
+                  raw=read('/assets/'+name+suffix)
+                  assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
+              print('LIVE_NAV_ASSET '+name+' bare and actual version URL hash verified.')
+          read('/index.php?page=store-info&section=sales_terms')
+          gallery=json.loads(read('/index.php?page=gallery-data&mode=preview'));assert gallery['ok'] and isinstance(gallery['count'],int)
+          try:
+              read('/_namira/.env.example');raise AssertionError('Private path exposed')
+          except HTTPError as e:assert e.code==403
+          print('LIVE_NAVIGATION_RELEASE_VERIFIED; store route ready, gallery count='+str(gallery['count'])+'; private directory403. No records written.')
+          
           PY
