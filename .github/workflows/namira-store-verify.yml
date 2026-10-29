@@ -31,7 +31,7 @@ jobs:
               except HTTPError as e:
                   return e.code,e.read(),dict(e.headers)
           failed=[]
-          for path in ['/index.php?page=home','/index.php?page=gallery','/index.php?page=shop','/index.php?page=store-info','/assets/gallery-filters.css','/assets/store.css','/assets/store.js']:
+          for path in ['/index.php?page=home','/index.php?page=gallery','/index.php?page=shop','/index.php?page=store-info&section=sales_terms','/assets/gallery-filters.css','/assets/store.css','/assets/store.js']:
               status,body,headers=get(path)
               row={'path':path,'status':status,'bytes':len(body),'type':headers.get('Content-Type'),'server':headers.get('Server')}
               if status not in (200,503): row['body']=re.sub('<[^>]+>',' ',body.decode('utf-8','replace'))[:350]
@@ -39,7 +39,7 @@ jobs:
                   local=pathlib.Path('namira-source/namira/public')/path.lstrip('/')
                   row['hash_match']=hashlib.sha256(body).digest()==hashlib.sha256(local.read_bytes()).digest()
                   if not row['hash_match']:failed.append(path)
-              if path=='/index.php?page=store-info':
+              if path=='/index.php?page=store-info&section=sales_terms':
                   print('STORE_PUBLIC_ROUTE_READY' if status==200 else 'STORE_ROUTE_FAILED')
                   if status!=200:failed.append('migration-not-ready')
               elif status!=200:failed.append(path)
