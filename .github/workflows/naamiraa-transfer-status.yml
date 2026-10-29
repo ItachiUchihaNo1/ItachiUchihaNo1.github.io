@@ -36,5 +36,20 @@ jobs:
           for name in sorted(names('_namira_live/releases')):
               if name.startswith('fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-'):releases.append({'release':name,'files':count('_namira_live/releases/'+name)})
           print('NAAMIRAA_TRANSFER_STATUS '+json.dumps({'releases':releases,'public_index':'index.php' in names('public_html'),'admin_index':'index.php' in names('admin.naamiraa.ir'),'public_assets':count('public_html/assets'),'configured':'config.local.json' in private,'locked':'.setup.lock' in private}))
+          def read(p):
+              import io
+              b=io.BytesIO();f.retrbinary('RETR '+home+'/'+p,b.write);return b.getvalue()
+          import re
+          for log in ['admin.naamiraa.ir/error_log','public_html/error_log']:
+              try:
+                  raw=read(log).decode('utf8','replace')
+                  patterns=[r'Allowed memory size of [0-9]+ bytes exhausted',r'Maximum execution time of [0-9]+ seconds exceeded',r'Namira installer error: [A-Za-z0-9_\\\\]+',r'Namira setup database error code [0-9]+']
+                  print('SAFE_INSTALL_LOG '+json.dumps({'path':log,'signals':[m for p in patterns for m in re.findall(p,raw)]}))
+              except error_perm:pass
+          manifests=[]
+          for name,meta in ls('_namira_live/storage/backups'):
+              if name.startswith('db-') and name.endswith('.json'):
+                  data=json.loads(read('_namira_live/storage/backups/'+name));manifests.append({'name':name,'bytes':data.get('bytes'),'rows':sum(data.get('tables',{}).values()),'reason':data.get('reason')})
+          print('PRIVATE_BACKUP_STATUS '+json.dumps(manifests))
           f.quit()
           PY
