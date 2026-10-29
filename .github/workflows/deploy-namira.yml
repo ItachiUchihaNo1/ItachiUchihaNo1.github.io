@@ -20,13 +20,13 @@ jobs:
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
       DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: cfd840d988d110270b494b577f18eb26c2579fb9
+      NAMIRA_RELEASE_ID: 674780cf3bf488a96f05362cce6c537067e01f89
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: cfd840d988d110270b494b577f18eb26c2579fb9
+          ref: 674780cf3bf488a96f05362cce6c537067e01f89
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
@@ -114,4 +114,33 @@ jobs:
           print('LIVE red theme assets, guest account header, safe mobile/password login, request route without503, artists and public geography verified.')
           print('LIVE managed storefront, home topic JSON and unavailable real SMS state verified; no accounts or records written.')
           print('LIVE gallery dynamic direct chips, JSON routes, unique cards, validation and asset integrity verified. No records written.')
+          PY
+
+      - name: Verify store release assets and database upgrade state
+        run: |
+          python3 - <<'PY'
+          import hashlib, pathlib
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+          base='https://test.shahidpics.com'
+          def read(path):
+              try:
+                  with urlopen(Request(base+path,headers={'Cache-Control':'no-cache','User-Agent':'Namira-store-release-check'}),timeout=30) as r:
+                      return r.status,r.read()
+              except HTTPError as e:
+                  return e.code,e.read()
+          status,body=read('/index.php?page=shop')
+          assert status==200,('shop',status)
+          for name in ['store.js','store.css']:
+              status,body=read('/assets/'+name+'?release=674780cf')
+              assert status==200,('asset',name,status)
+              local=pathlib.Path('namira-source/namira/public/assets')/name
+              assert hashlib.sha256(body).digest()==hashlib.sha256(local.read_bytes()).digest(),name
+          status,body=read('/index.php?page=store-info')
+          assert status in (200,503),('store-info',status)
+          if status==503:
+              print('STORE_MIGRATION_PENDING: authenticated superadmin must open admin once; automatic SQL backup and counts precede migrations 009/010/011.')
+          else:
+              print('STORE_PUBLIC_ROUTE_READY: store-info HTTP 200.')
+          print('STORE_RELEASE_VERIFIED: shop HTTP 200; store CSS/JS match validated source. No customer/order writes performed.')
           PY
