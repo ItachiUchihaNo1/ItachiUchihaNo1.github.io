@@ -1,0 +1,87 @@
+name: Finish verified staged Naamiraa installation
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-finish.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+      NAAMIRAA_DB_PASSWORD: ${{ secrets.NAAMIRAA_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: fdf54bc5ecbed81eecd05be44247ce820e3d3cd1
+          path: namira-source
+          persist-credentials: false
+      - name: Verify staged manifest and finish single-use database copy
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,re,hashlib,http.cookiejar
+          from pathlib import Path
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          from urllib.request import build_opener,HTTPCookieProcessor,HTTPSHandler
+          from urllib.error import HTTPError
+          release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57'
+          prefix=d.PRIVATE+'/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60)
+          f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          def post(setup,data,opener):
+              try:return d.http(setup,data,opener)
+              except HTTPError as e:
+                  raw=e.read()
+                  messages=['نام کاربری یا رمز دیتابیس پذیرفته نشد.','کاربر MySQL به دیتابیس دسترسی کافی ندارد؛ کاربر را به دیتابیس متصل کنید و مجوزهای لازم را بدهید.','دیتابیس پیدا نشد؛ نام کامل همراه پیشوند cPanel را وارد کنید.','انتقال فقط به دیتابیس کاملاً خالی مجاز است؛ مقصد موجود تغییر نکرد.','نصب دیتابیس کامل نشد؛ خطای هاست را بررسی کنید. در صورت ساخت جدول‌های ناقص، برای تلاش بعدی دیتابیس خالی جدید انتخاب کنید.','نصب کامل نشد؛ مجوز نوشتن پوشه خصوصی و خطای هاست را بررسی کنید. اطلاعات محرمانه را در چت نفرستید.']
+                  print('INSTALLER_STATUS '+json.dumps({'http':e.code,'message':next((m for m in messages if m.encode() in raw),'Installation not confirmed; private logs require inspection')},ensure_ascii=False),flush=True)
+                  raise d.DeploymentError('Installer stopped; no blind retry and no originals modified')
+          try:
+              assert release.encode() in r.read(d.PRIVATE+'/current.php'),'Unexpected current release'
+              manifest=json.loads(r.read(prefix+'/manifest.json'))
+              expected=[]
+              for folder in ['app','views','database','bin','docs','licenses']:
+                  for file in sorted((d.ROOT/folder).rglob('*')):
+                      if file.is_file():expected.append({'path':file.relative_to(d.ROOT).as_posix(),'sha256':hashlib.sha256(file.read_bytes()).hexdigest()})
+              assert manifest==expected,'Staged manifest differs from tested source'
+              for surface,folder in [('public',d.PUBLIC),('admin',d.ADMIN)]:
+                  assert r.read(folder+'/index.php')==d.entry(surface),'Entrypoint mismatch'
+                  for asset in ['calls.js','calls.css','application.css']:
+                      assert r.read(folder+'/assets/'+asset)==(d.ROOT/'public/assets'/asset).read_bytes(),'Asset mismatch'
+              print('STAGED_RELEASE_VERIFIED '+str(len(manifest)),flush=True)
+              if r.maybe(d.PRIVATE+'/config.local.json') is None:
+                  assert r.maybe(d.PRIVATE+'/.setup.lock') is None,'Conflicting install state'
+                  key=r.read(d.PRIVATE+'/.setup.key')
+                  opener=build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()),HTTPSHandler(context=ssl.create_default_context()))
+                  setup=d.SITES['admin']+'/index.php?page=setup'
+                  _,body,_=d.http(setup,opener=opener)
+                  _,body,_=post(setup,{'action':'unlock','csrf':d.csrf(body),'setup_key':key.decode()},opener)
+                  try:post(setup,{'action':'migrate-existing','csrf':d.csrf(body),'db_host':'localhost','db_port':'3306','db_name':'ouidoyhy_namira_live','db_user':'ouidoyhy_nmapp','db_password':os.environ['NAAMIRAA_DB_PASSWORD']},opener)
+                  except Exception:
+                      if r.maybe(d.PRIVATE+'/.setup.lock') is None:raise
+              assert r.maybe(d.PRIVATE+'/.setup.lock') is not None and r.maybe(d.PRIVATE+'/config.local.json') is not None,'Installation not confirmed'
+              report=json.loads(r.read(d.PRIVATE+'/domain-migration-report.json'))
+              for surface,page in [('public','home'),('admin','login')]:
+                  code,body,_=d.http(d.SITES[surface]+'/index.php?page='+page)
+                  assert code==200 and 'نامیرا'.encode() in body,'Live response failed'
+                  if surface=='admin':assert 'ورود مدیر نامیرا'.encode() in body and b'desktop-navigation' not in body,'Admin surface mismatch'
+              result={'source':release[:40],'release':release,'public':d.SITES['public'],'admin':d.SITES['admin'],'database':'ouidoyhy_namira_live','copied_files':report['copied_files'],'copied_bytes':report['copied_bytes'],'source_rows':sum(report['source_tables'].values()),'target_rows':sum(report['target_tables'].values()),'source_modified':False,'public_http':200,'admin_login_http':200}
+              Path('naamiraa-release-result.json').write_text(json.dumps(result,indent=2))
+              print('NAAMIRAA_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          finally:f.quit()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-domain-release
+          path: naamiraa-release-result.json
+          retention-days: 14
