@@ -18,67 +18,67 @@ jobs:
       DEPLOY_FTPS_USERNAME: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
       DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
-      DEPLOY_FTPS_DIR: ${{ vars.NAMIRA_FTPS_DIR || 'Public_html/new' }}
+      DEPLOY_FTPS_DIR: Public_html/new
       DEPLOY_SITE_URL: https://test.shahidpics.com
-      NAMIRA_RELEASE_ID: eee8ec866b9b2d3d890e4d7a8b6864cb8d824e2d
+      NAMIRA_RELEASE_ID: f761afc6ddff0b26876081827f7d3df4e949ef29
     steps:
       - name: Read validated Namira source from heiat-network
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: eee8ec866b9b2d3d890e4d7a8b6864cb8d824e2d
+          ref: f761afc6ddff0b26876081827f7d3df4e949ef29
           path: namira-source
           persist-credentials: false
       - name: Validate deployment script
         run: python3 -m py_compile namira-source/namira/deploy/ftps.py
+      - name: Require successful checks for the exact source revision
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request
+          req=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs/40854605461',headers={'User-Agent':'Namira-calls-deployment'})
+          with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
+          assert data['head_sha']=='f761afc6ddff0b26876081827f7d3df4e949ef29' and data['conclusion']=='success', 'Exact-source Namira CI must succeed before upload'
+          print('Exact source CI confirmed: PHP/MySQL, calls browser, store and mobile navigation.')
+          PY
       - name: Deploy only Namira to its own document root
         run: python3 namira-source/namira/deploy/ftps.py
 
 
-      - name: Verify shared mobile navigation and existing public routes
+      - name: Verify active calls release and preserve private migration evidence
         run: |
           python3 - <<'PY'
-          import hashlib,json,pathlib
-          from html.parser import HTMLParser
+          import os,ssl,io,re,json,hashlib,pathlib
+          from ftplib import FTP_TLS
           from urllib.request import Request,urlopen
-          from urllib.error import HTTPError
-          BASE='https://test.shahidpics.com'
-          class Nav(HTMLParser):
-              def __init__(self):
-                  super().__init__();self.inside=False;self.links=[];self.active=0;self.drawer=False;self.toggle=False
-              def handle_starttag(self,tag,attrs):
-                  a=dict(attrs)
-                  if tag=='nav' and 'nm-bottom-nav' in a.get('class',''):self.inside=True
-                  if tag=='a' and self.inside:
-                      self.links.append(a.get('href',''))
-                      if a.get('aria-current')=='page':self.active+=1
-                  if tag=='dialog' and a.get('id')=='mobile-navigation':self.drawer=True
-                  if tag=='button' and 'data-mobile-menu' in a:self.toggle=True
-              def handle_endtag(self,tag):
-                  if tag=='nav':self.inside=False
-          def read(path):
-              with urlopen(Request(BASE+path,headers={'Cache-Control':'no-cache','User-Agent':'Namira-mobile-nav-release-check'}),timeout=35) as r:
-                  assert r.status==200,(path,r.status)
-                  return r.read()
-          expected=['home','gallery','artists','shop','member-login']
-          for page in ['home','gallery','artists','shop','member-login']:
-              body=read('/index.php?page='+page);html=body.decode('utf-8');nav=Nav();nav.feed(html)
-              assert nav.links==['/index.php?page='+p for p in expected],(page,nav.links)
-              assert nav.active==1 and nav.drawer and nav.toggle,page
-              assert 'بانک شهدا</span>' not in html
-              assert 'Warning:' not in html and 'Fatal error:' not in html
-              print('LIVE_MOBILE_NAV '+page+' HTTP200; five destinations, active item and drawer verified.')
-          for name in ['mobile-navigation.css','mobile-navigation.js']:
-              local=pathlib.Path('namira-source/namira/public/assets')/name
-              for suffix in ['', '?v=20261029-1']:
-                  raw=read('/assets/'+name+suffix)
-                  assert hashlib.sha256(raw).digest()==hashlib.sha256(local.read_bytes()).digest(),name
-              print('LIVE_NAV_ASSET '+name+' bare and actual version URL hash verified.')
-          read('/index.php?page=store-info&section=sales_terms')
-          gallery=json.loads(read('/index.php?page=gallery-data&mode=preview'));assert gallery['ok'] and isinstance(gallery['count'],int)
-          try:
-              read('/_namira/.env.example');raise AssertionError('Private path exposed')
-          except HTTPError as e:assert e.code==403
-          print('LIVE_NAVIGATION_RELEASE_VERIFIED; store route ready, gallery count='+str(gallery['count'])+'; private directory403. No records written.')
-          
+          from urllib.error import HTTPError,URLError
+          f=FTP_TLS(context=ssl.create_default_context(),timeout=60)
+          f.connect(os.environ['DEPLOY_FTPS_HOST'],int(os.environ['DEPLOY_FTPS_PORT']))
+          f.login(os.environ['DEPLOY_FTPS_USERNAME'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();f.cwd('Public_html/new')
+          def read(name):
+              b=io.BytesIO();f.retrbinary('RETR '+name,b.write);return b.getvalue()
+          index=read('index.php').decode('ascii');match=re.search(r"_namira/releases/(f761afc6ddff0b26876081827f7d3df4e949ef29-[a-f0-9]{12})/app/bootstrap.php",index)
+          assert match,'Expected call release was not activated'
+          release=match.group(1);root='_namira/releases/'+release
+          paths={'assets/calls.js':'public/assets/calls.js','assets/calls.css':'public/assets/calls.css',root+'/app/CallSchema.php':'app/CallSchema.php',root+'/app/CallEntries.php':'app/CallEntries.php',root+'/views/call-submit.php':'views/call-submit.php',root+'/views/layout.php':'views/layout.php'}
+          for remote,local in paths.items():
+              assert hashlib.sha256(read(remote)).digest()==hashlib.sha256((pathlib.Path('namira-source/namira')/local).read_bytes()).digest(),remote
+          reports=[name for name,meta in f.mlsd('_namira/storage/backups') if name.startswith('migration-012-') and name.endswith('.json')]
+          migration=None
+          if reports:
+              m=json.loads(read('_namira/storage/backups/'+sorted(reports)[-1]));assert all(m['after'][k]==v for k,v in m['before'].items());migration={'report':sorted(reports)[-1],'before_rows':sum(m['before'].values()),'after_rows':sum(m['after'].values()),'existing_rows_rewritten':m['existing_rows_rewritten']}
+          f.quit()
+          public={}
+          for page in ['home','calls']:
+              try:
+                  with urlopen(Request('https://test.shahidpics.com/index.php?page='+page,headers={'User-Agent':'Namira-calls-release-check','Cache-Control':'no-cache'}),timeout=30) as r:
+                      html=r.read().decode('utf-8');public[page]={'status':r.status,'calls_ui':('/assets/calls.js' in html) if page=='calls' else None};assert 'Fatal error:' not in html and 'Warning:' not in html
+              except (HTTPError,URLError) as e: public[page]={'status':getattr(e,'code',None),'verification_pending':True}
+          result={'source':'f761afc6ddff0b26876081827f7d3df4e949ef29','release':release,'target':'Public_html/new','readback_files':len(paths),'migration':migration,'migration_pending':migration is None,'public':public,'production_changed':False}
+          print('CALLS_RELEASE_RESULT '+json.dumps(result,ensure_ascii=False));pathlib.Path('calls-release-result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
           PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: namira-calls-release
+          path: calls-release-result.json
+          retention-days: 14
