@@ -1,0 +1,70 @@
+name: Verify Namira DNS and existing hosting only
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-namira-host.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: namira-test-shahidpics-existing-connection
+  cancel-in-progress: false
+jobs:
+  deploy-namira:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USERNAME: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+      DEPLOY_FTPS_PORT: ${{ vars.DEPLOY_FTPS_PORT || '21' }}
+      DEPLOY_FTPS_DIR: Public_html/new
+      DEPLOY_SITE_URL: https://test.shahidpics.com
+      NAMIRA_RELEASE_ID: f761afc6ddff0b26876081827f7d3df4e949ef29
+    steps:
+      - name: Read validated Namira source from heiat-network
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: f761afc6ddff0b26876081827f7d3df4e949ef29
+          path: namira-source
+          persist-credentials: false
+      - name: Validate deployment script
+        run: python3 -m py_compile namira-source/namira/deploy/ftps.py
+      - name: Require successful checks for the exact source revision
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request
+          req=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs/40854605461',headers={'User-Agent':'Namira-calls-deployment'})
+          with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
+          assert data['head_sha']=='f761afc6ddff0b26876081827f7d3df4e949ef29' and data['conclusion']=='success', 'Exact-source Namira CI must succeed before upload'
+          print('Exact source CI confirmed: PHP/MySQL, calls browser, store and mobile navigation.')
+          PY
+      - name: Diagnose test subdomain and verify hosting origin without bypassing TLS
+        run: |
+          python3 - <<'PY'
+          import socket,os,ssl,urllib.request,json,subprocess
+          host='test.shahidpics.com';origin=socket.gethostbyname(os.environ['DEPLOY_FTPS_HOST'])
+          try: public=socket.gethostbyname_ex(host);print('PUBLIC_DNS '+json.dumps(public))
+          except socket.gaierror as e: print('PUBLIC_DNS_UNAVAILABLE '+str(e))
+          for query in [('NS','shahidpics.com'),('A',host),('AAAA',host),('CNAME',host)]:
+              try:
+                  r=subprocess.run(['dig','@1.1.1.1',query[1],query[0],'+noall','+comments','+answer','+authority','+time=3','+tries=1'],capture_output=True,text=True,timeout=5)
+                  print('DNS_QUERY '+query[0]+' '+query[1]+' '+r.stdout.strip())
+              except Exception as e: print('DNS_QUERY_UNAVAILABLE '+type(e).__name__)
+          old=socket.getaddrinfo
+          def resolve(name,port,*args,**kwargs): return old(origin if name==host else name,port,*args,**kwargs)
+          socket.getaddrinfo=resolve
+          print('HOSTING_ORIGIN_PUBLIC_IP '+origin)
+          try:
+              with urllib.request.urlopen(urllib.request.Request('https://'+host+'/index.php?page=home',headers={'User-Agent':'Namira-origin-read-only-check'}),timeout=35,context=ssl.create_default_context()) as r:
+                  import re
+                  html=r.read().decode('utf-8');title=re.search(r'<title>(.*?)</title>',html,re.I|re.S)
+                  print('ORIGIN_HTTP '+json.dumps({'status':r.status,'final_url':r.geturl(),'title':title.group(1) if title else None,'namira_marker':'نامیرا' in html,'bytes':len(html)},ensure_ascii=False))
+          except Exception as e: print('ORIGIN_HTTP_ERROR '+str(e))
+          from ftplib import FTP_TLS
+          import io
+          f=FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USERNAME'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();f.cwd('Public_html/new');b=io.BytesIO();f.retrbinary('RETR index.php',b.write);index=b.getvalue().decode('utf-8')
+          match=re.search(r'_namira/releases/([a-z0-9-]+)/app/bootstrap.php',index);print('EXISTING_NAMIRA_RELEASE '+(match.group(1) if match else 'unrecognized'))
+          f.quit()
+          PY
