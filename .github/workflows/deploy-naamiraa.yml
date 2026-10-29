@@ -18,12 +18,12 @@ jobs:
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
       NAAMIRAA_DB_PASSWORD: ${{ secrets.NAAMIRAA_DB_PASSWORD }}
-      NAMIRA_RELEASE_ID: c4a2d1590d0a94f1eb4e6a524cc79d056ce23a47
+      NAMIRA_RELEASE_ID: fdf54bc5ecbed81eecd05be44247ce820e3d3cd1
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: c4a2d1590d0a94f1eb4e6a524cc79d056ce23a47
+          ref: fdf54bc5ecbed81eecd05be44247ce820e3d3cd1
           path: namira-source
           persist-credentials: false
       - name: Require passing exact-source Namira tests before any upload
