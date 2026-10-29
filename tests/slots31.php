@@ -1,0 +1,27 @@
+<?php
+require __DIR__.'/common.php';
+use Morshed\Core\{Security,Problem};use Morshed\Product\{Consultations,Membership};
+$n31=0;function ok31(bool $ok,string $label):void{global $n31;if(!$ok)throw new RuntimeException($label);$n31++;echo "PASS $label\n";}function no31(string $code,callable $fn):void{try{$fn();}catch(Problem $e){ok31($e->errorCode===$code,'denied '.$code);return;}throw new RuntimeException('Expected '.$code);}
+$m=new Membership($db);$m->storage();$old=$m->policy()['enabled'];$db->run('UPDATE m_service_policy SET enabled=0 WHERE id=1');
+try{
+ $people=[];foreach(['مرشد بازه ۳۱','مخاطب بازه ۳۱','مخاطب دوم ۳۱'] as $name){$id=Security::id();$db->run("INSERT INTO m_users(id,phone,phone_verified_at,password_hash,display_name,status,created_at,updated_at) VALUES(?,?,?,?,?,'active',?,?)",[$id,'098'.random_int(10000000,99999999),time(),Security::hashPassword($cfg['test_manual_password']),$name,time(),time()]);$people[]=['realm'=>'site','user_id'=>$id];}[$host,$user,$other]=$people;$mid=$host['user_id'];
+ $db->run("INSERT INTO m_mentors(user_id,headline,bio,status,invited_at,accepted_at,updated_at) VALUES(?,?,?,'active',?,?,?)",[$mid,'آزمون زمان‌بندی','فقط آزمون محلی',time(),time(),time()]);$db->run('INSERT INTO m_schedule_settings(mentor_id) VALUES(?)',[$mid]);
+ $c=new Consultations($db,$audit);$settings=['duration_minutes'=>30,'buffer_minutes'=>0,'lead_minutes'=>0,'daily_capacity'=>20];$c->settings($host,$settings);ok31((int)$c->calendar($host)['settings']['lead_minutes']===0,'same-day admission can use zero mandatory lead hours');
+ $day=(new DateTimeImmutable('today',new DateTimeZone('Asia/Tehran')))->modify('+2 days');$date=$day->format('Y-m-d');$start=(new DateTimeImmutable($date.' 14:07:00',new DateTimeZone('Asia/Tehran')))->getTimestamp();
+ $c->settings($host,array_replace($settings,['lead_minutes'=>30]));$minuteSettings=$c->calendar($host)['settings'];ok31((int)$minuteSettings['lead_minutes']===30&&(int)$minuteSettings['lead_hours']===1,'half-hour notice is stored without violating legacy hour constraints');$legacySettings=$settings;unset($legacySettings['lead_minutes']);$legacySettings['lead_hours']=2;$c->settings($host,$legacySettings);ok31((int)$c->calendar($host)['settings']['lead_minutes']===120,'legacy hour-based clients retain their original meaning');$c->settings($host,$settings);
+ $c->rule($host,['kind'=>'date','date'=>$date,'weekday'=>0,'start_time'=>'14:07','end_time'=>'15:07']);
+ $short=$c->slots($mid,$date,null,15);ok31(array_column($short,'starts_at')===[$start,$start+900,$start+1800,$start+2700],'15-minute slots stay anchored at 14:07, 14:22, 14:37 and 14:52');
+ ok31(array_column($c->slots($mid,$date,null,30),'starts_at')===[$start,$start+1800],'30-minute selection rebuilds the same window into two half-hours');
+ $payload=['mentor_id'=>$mid,'starts_at'=>$start+900,'selected_date'=>$date,'duration_minutes'=>15,'problem'=>'نیاز واقعی مخاطب آزمایشی برای بررسی بازه','subject'=>'رزرو آزمون بازه','requested_method'=>'chat','idempotency_key'=>Security::id()];
+ no31('DATE_MISMATCH',fn()=>$c->reserve($user,array_replace($payload,['selected_date'=>$day->modify('+1 day')->format('Y-m-d')])));
+ $bid=$c->reserve($user,$payload);ok31(array_column($c->slots($mid,$date,null,15),'starts_at')===[$start,$start+1800,$start+2700],'pending hold immediately disappears from 15-minute choices');
+ ok31(array_column($c->slots($mid,$date,null,30),'starts_at')===[$start+1800],'overlapping 30-minute interval is also removed');
+ no31('SLOT_UNAVAILABLE',fn()=>$c->reserve($other,array_replace($payload,['idempotency_key'=>Security::id()])));
+ $c->transition($host,$bid,'reject');ok31(count($c->slots($mid,$date,null,15))===4,'rejection releases the interval');
+ $payload['idempotency_key']=Security::id();$bid=$c->reserve($user,$payload);$c->transition($host,$bid,'accept');ok31(count($c->slots($mid,$date,null,15))===3,'confirmed reservation remains hidden');$c->transition($user,$bid,'cancel');ok31(count($c->slots($mid,$date,null,15))===4,'cancellation releases the interval');
+ $payload['idempotency_key']=Security::id();$expired=$c->reserve($user,$payload);$db->run('UPDATE m_bookings SET expires_at=? WHERE id=?',[time()-1,$expired]);ok31(count($c->slots($mid,$date,null,15))===4,'expired hold does not hide a free time');
+ $today=(new DateTimeImmutable('today',new DateTimeZone('Asia/Tehran')))->format('Y-m-d');$b=$c->browse($mid,'',15);ok31($b['date']===$today&&!$b['slots']&&$b['nextDate']===$date,'empty today stays today and only suggests the next available date');$b=$c->browse($mid,$today,30);ok31($b['date']===$today&&!$b['slots'],'explicit empty date never jumps to another date');$b=$c->browse($mid,'2020-01-01',15);ok31($b['dateCorrected']&&$b['date']===$today,'stale date recovery is explicit and does not jump to future availability');
+ $c->settings($host,array_replace($settings,['buffer_minutes'=>15]));ok31(array_column($c->slots($mid,$date,null,15),'starts_at')===[$start,$start+1800],'configured break is retained without shifting the window origin');$c->settings($host,$settings);
+ $payload['idempotency_key']=Security::id();$busy=$c->reserve($user,$payload);$c->transition($host,$busy,'accept');
+ file_put_contents(dirname($argv[1]).'/slots31-fixture.json',json_encode(['mentor_id'=>$mid,'date'=>$date,'start'=>$start]));echo "$n31 slots31 checks passed\n";
+}finally{$db->run('UPDATE m_service_policy SET enabled=? WHERE id=1',[$old]);}

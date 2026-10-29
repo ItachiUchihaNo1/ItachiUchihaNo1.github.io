@@ -187,7 +187,7 @@ INSERT INTO m_store_publication(id) VALUES(1);
 CREATE TABLE m_schedule_settings (
  mentor_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
  duration_minutes SMALLINT NOT NULL DEFAULT 30, buffer_minutes SMALLINT NOT NULL DEFAULT 10,
- lead_hours SMALLINT NOT NULL DEFAULT 24, daily_capacity SMALLINT NOT NULL DEFAULT 4,
+ lead_hours SMALLINT NOT NULL DEFAULT 24, lead_minutes INT NULL DEFAULT NULL, daily_capacity SMALLINT NOT NULL DEFAULT 4,
  auto_accept TINYINT NOT NULL DEFAULT 0, timezone VARCHAR(50) NOT NULL DEFAULT 'Asia/Tehran',
  FOREIGN KEY(mentor_id) REFERENCES m_mentors(user_id), CHECK(duration_minutes BETWEEN 15 AND 120),
  CHECK(buffer_minutes BETWEEN 0 AND 120), CHECK(lead_hours BETWEEN 1 AND 720), CHECK(daily_capacity BETWEEN 1 AND 30)

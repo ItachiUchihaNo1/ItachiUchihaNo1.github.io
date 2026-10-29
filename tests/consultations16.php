@@ -13,7 +13,7 @@ $c->rule($a,['kind'=>'daily','weekday'=>0,'start_time'=>'10:00','end_time'=>'12:
 check16(count($c->slots($id,$date,null,15))===4,'daily recurrence generates 15-minute choices with buffers');
 check16(count($c->slots($id,$date,null,30))===3,'same free window supports 30-minute choices');
 check16(reject16('INVALID_DURATION',fn()=>$c->slots($id,$date,null,20)),'arbitrary requester duration is rejected');
-$before=$db->queryCount();$browse=$c->browse($id,'2020-01-01',15);check16($browse['dateCorrected']&&$browse['slots']&&$browse['date']>='2026-01-01','stale calendar links recover to a current available date');
+$before=$db->queryCount();$browse=$c->browse($id,'2020-01-01',15);check16($browse['dateCorrected']&&$browse['date']===$browse['minDate'],'stale calendar links recover to today without silently choosing another day');
 check16($db->queryCount()-$before<=6,'finding availability uses a bounded query snapshot');
 $daily=$c->calendar($a)['recurrences'][0];$c->removeRule($a,$daily['id'],'daily');
 check16($c->slots($id,$date,null,30)===[],'removing a recurrence immediately removes its availability');
