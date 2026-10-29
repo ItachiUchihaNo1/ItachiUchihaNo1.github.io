@@ -1,0 +1,40 @@
+name: Read-only Naamiraa transfer progress
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-transfer-status.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - name: Count staged files without reading credentials or changing files
+        run: |
+          python3 -u - <<'PY'
+          import os,ssl,json
+          from ftplib import FTP_TLS,error_perm
+          f=FTP_TLS(context=ssl.create_default_context(),timeout=40);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();home=f.pwd().rstrip('/')
+          def ls(p):
+              try:return list(f.mlsd(home+'/'+p))
+              except error_perm:return []
+          def names(p):return {name for name,meta in ls(p) if meta.get('type') not in ['cdir','pdir']}
+          def count(p):
+              total=0
+              for name,meta in ls(p):
+                  if name in ['.','..']:continue
+                  if meta.get('type')=='dir':total+=count(p+'/'+name)
+                  elif meta.get('type')=='file':total+=1
+              return total
+          private=names('_namira_live');releases=[]
+          for name in sorted(names('_namira_live/releases')):
+              if name.startswith('fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-'):releases.append({'release':name,'files':count('_namira_live/releases/'+name)})
+          print('NAAMIRAA_TRANSFER_STATUS '+json.dumps({'releases':releases,'public_index':'index.php' in names('public_html'),'admin_index':'index.php' in names('admin.naamiraa.ir'),'public_assets':count('public_html/assets'),'configured':'config.local.json' in private,'locked':'.setup.lock' in private}))
+          f.quit()
+          PY
