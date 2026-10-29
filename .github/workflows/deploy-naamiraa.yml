@@ -1,0 +1,58 @@
+name: Deploy Naamiraa public and separate admin
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/deploy-naamiraa.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+      NAAMIRAA_DB_PASSWORD: ${{ secrets.NAAMIRAA_DB_PASSWORD }}
+      NAMIRA_RELEASE_ID: c4a2d1590d0a94f1eb4e6a524cc79d056ce23a47
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: c4a2d1590d0a94f1eb4e6a524cc79d056ce23a47
+          path: namira-source
+          persist-credentials: false
+      - name: Require passing exact-source Namira tests before any upload
+        run: |
+          python3 - <<'PY'
+          import urllib.request,json,time,os
+          sha=os.environ['NAMIRA_RELEASE_ID'];endpoint='https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=10'
+          for attempt in range(30):
+              req=urllib.request.Request(endpoint,headers={'User-Agent':'Naamiraa-exact-source-gate','Cache-Control':'no-cache'})
+              with urllib.request.urlopen(req,timeout=30) as r:runs=json.load(r)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira PHP - Test and deploy FTPS' and r['head_sha']==sha]
+              if matches:
+                  run=matches[0]
+                  if run['conclusion']=='success':print('EXACT_SOURCE_TESTS_PASSED '+str(run['id']));break
+                  if run['conclusion'] in ('failure','cancelled','timed_out','action_required'):raise RuntimeError('Exact source tests did not pass; application not uploaded')
+              if attempt%4==0:print('Waiting for exact-source tests; no upload started.',flush=True)
+              time.sleep(30)
+          else:raise RuntimeError('Exact-source CI not complete; no upload started')
+          PY
+      - name: Validate independent-root deployment script
+        run: |
+          python3 -m py_compile namira-source/namira/deploy/domains.py
+          python3 namira-source/namira/tests/domain-deploy.py
+      - name: Transfer public/admin entry points and copy existing data into independent database
+        run: python3 -u namira-source/namira/deploy/domains.py
+      - name: Save deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: naamiraa-domain-release
+          path: naamiraa-release-result.json
+          retention-days: 14
