@@ -1,0 +1,68 @@
+name: Patch verified mobile navigation desktop visibility
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/namira-mobile-desktop-fix.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: namira-test-shahidpics-existing-connection
+  cancel-in-progress: false
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USERNAME: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 6f0db4e558d25ab1ed950cc7063b4fd3f3801480
+          path: namira-source
+          persist-credentials: false
+      - name: Back up and atomically patch two exact known Namira files
+        run: |
+          python3 - <<'PY'
+          import hashlib,importlib.util,io,json,os,ssl,uuid
+          from ftplib import FTP_TLS
+          from pathlib import Path
+          source=Path('namira-source/namira')
+          spec=importlib.util.spec_from_file_location('namira_ftps',source/'deploy/ftps.py')
+          d=importlib.util.module_from_spec(spec);spec.loader.exec_module(d)
+          release='_namira/releases/eee8ec866b9b2d3d890e4d7a8b6864cb8d824e2d-624485406b69'
+          targets=[('assets/mobile-navigation.css',source/'public/assets/mobile-navigation.css','5e6a70387301054104504813d45088bf2a47bbaf5812b953aa7056f977812300'),(release+'/views/layout.php',source/'views/layout.php','2f5c760598f52c13277106b401e083f1bbb5811aa47fd361f5ed99a4008b81ec')]
+          ftp=FTP_TLS(context=ssl.create_default_context(),timeout=60)
+          before={};changed=[]
+          def read(path):
+              b=io.BytesIO();ftp.retrbinary('RETR '+path,b.write);return b.getvalue()
+          def sha(b):return hashlib.sha256(b).hexdigest()
+          try:
+              ftp.connect(os.environ['DEPLOY_FTPS_HOST'],21);ftp.login(os.environ['DEPLOY_FTPS_USERNAME'],os.environ['DEPLOY_FTPS_PASSWORD']);ftp.prot_p()
+              ftp.cwd('Public_html/new')
+              index=read('index.php')
+              assert (release+'/app/bootstrap.php').encode() in index and b'Namira\\Web::run' in index,'Unexpected active application; refusing patch'
+              backup=release+'/mobile-desktop-fix-'+uuid.uuid4().hex[:12]
+              for path,local,oldhash in targets:
+                  previous=read(path);new=local.read_bytes()
+                  assert sha(previous) in (oldhash,sha(new)),'Unexpected remote file: '+path
+                  before[path]=previous
+                  if previous!=new:d.upload(ftp,backup+'/'+local.name,previous)
+              try:
+                  for path,local,oldhash in targets:
+                      new=local.read_bytes()
+                      if before[path]!=new:
+                          d.upload(ftp,path,new);changed.append(path)
+                      assert sha(read(path))==sha(new),'Readback mismatch: '+path
+              except Exception:
+                  for path in reversed(changed):d.upload(ftp,path,before[path])
+                  raise
+              print('MOBILE_DESKTOP_PATCH_VERIFIED '+json.dumps({'source':'6f0db4e558d25ab1ed950cc7063b4fd3f3801480','paths':changed,'backup':backup,'readback_sha256':{path:sha(read(path)) for path,_,_ in targets}}))
+          finally:
+              try:ftp.quit()
+              except Exception:ftp.close()
+          
+          PY
