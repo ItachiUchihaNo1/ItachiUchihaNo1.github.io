@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 3a0066e36027bb2222da1885f777a040c94b4e33
+          ref: 661bbf143123599b5fc849b306866803a58d1859
           path: namira-source
           persist-credentials: false
       - name: Validate navigation model and PHP syntax
@@ -43,14 +43,14 @@ jobs:
           release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57'
           assert release.encode() in read('_namira_live/current.php'),'Unexpected active release'
           path='_namira_live/releases/'+release+'/app/MobileNavigation.php'
-          before=read(path);oldhash=hashlib.sha256(before).hexdigest();assert oldhash in ['1405868d8fd10ec0777b99d3b94504ee9846ca1599b640ecf808f5bd0f883fea','7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205'],'Unexpected navigation revision'
-          new=Path('namira-source/namira/app/MobileNavigation.php').read_bytes();assert hashlib.sha256(new).hexdigest()=='7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205'
-          if oldhash!='7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205':
-              backup='_namira_live/backups/mobile-order-3a0066e36027'
+          before=read(path);oldhash=hashlib.sha256(before).hexdigest();assert oldhash in ['1405868d8fd10ec0777b99d3b94504ee9846ca1599b640ecf808f5bd0f883fea','7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205','7d7e59b1bfb3829036595c6d478375b6f86caab46b42782bb12496006ea37154'],'Unexpected navigation revision'
+          new=Path('namira-source/namira/app/MobileNavigation.php').read_bytes();assert hashlib.sha256(new).hexdigest()=='7d7e59b1bfb3829036595c6d478375b6f86caab46b42782bb12496006ea37154'
+          if oldhash!='7d7e59b1bfb3829036595c6d478375b6f86caab46b42782bb12496006ea37154':
+              backup='_namira_live/backups/mobile-order-661bbf143123'
               f.mkd(home+'/'+backup);put(backup+'/MobileNavigation.php',before);put(path,new)
           assert read(path)==new,'Readback mismatch'
           f.quit()
-          expected=['خانه','تصاویر','فروشگاه','هنرمندان','حساب کاربری']
+          expected=['خانه','تصاویر','فروشگاه','هنرمندان','حساب']
           pages=['home','gallery','shop','artists','member-login']
           for attempt in range(8):
               with urlopen(Request('https://naamiraa.ir/index.php?page=home',headers={'Cache-Control':'no-cache'}),timeout=40) as response:html=response.read().decode()
@@ -60,5 +60,5 @@ jobs:
           assert labels==expected,'Live menu does not match expected labels'
           nav=re.search(r'<nav class="nm-bottom-nav".*?</nav>',html,re.S).group()
           assert re.findall(r'href="[^"]*page=([^"&]+)',nav)==pages,'Unexpected destination order'
-          print('NAMIRAA_MOBILE_ORDER_VERIFIED '+json.dumps({'source':'3a0066e36027bb2222da1885f777a040c94b4e33','labels':labels,'pages':pages,'sha256':'7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205'},ensure_ascii=False))
+          print('NAMIRAA_MOBILE_ORDER_VERIFIED '+json.dumps({'source':'661bbf143123599b5fc849b306866803a58d1859','labels':labels,'pages':pages,'sha256':'7d7e59b1bfb3829036595c6d478375b6f86caab46b42782bb12496006ea37154'},ensure_ascii=False))
           PY
