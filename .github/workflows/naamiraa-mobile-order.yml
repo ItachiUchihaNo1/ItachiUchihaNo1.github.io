@@ -1,0 +1,64 @@
+name: Update Naamiraa mobile bottom tab order
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-mobile-order.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 3a0066e36027bb2222da1885f777a040c94b4e33
+          path: namira-source
+          persist-credentials: false
+      - name: Validate navigation model and PHP syntax
+        run: |
+          php -l namira-source/namira/app/MobileNavigation.php
+          php namira-source/namira/tests/mobile-navigation.php
+      - name: Back up and atomically update only active mobile navigation model
+        run: |
+          python3 -u - <<'PY'
+          import os,ssl,io,uuid,hashlib,json,re,time
+          from pathlib import Path
+          from ftplib import FTP_TLS
+          from urllib.request import urlopen,Request
+          f=FTP_TLS(context=ssl.create_default_context(),timeout=50);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();home=f.pwd().rstrip('/')
+          def read(p):
+              b=io.BytesIO();f.retrbinary('RETR '+home+'/'+p,b.write);return b.getvalue()
+          def put(p,raw):
+              tmp=p+'.upload-'+uuid.uuid4().hex;f.storbinary('STOR '+home+'/'+tmp,io.BytesIO(raw));f.rename(home+'/'+tmp,home+'/'+p);f.sendcmd('SITE CHMOD 600 '+home+'/'+p)
+          release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57'
+          assert release.encode() in read('_namira_live/current.php'),'Unexpected active release'
+          path='_namira_live/releases/'+release+'/app/MobileNavigation.php'
+          before=read(path);oldhash=hashlib.sha256(before).hexdigest();assert oldhash in ['1405868d8fd10ec0777b99d3b94504ee9846ca1599b640ecf808f5bd0f883fea','7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205'],'Unexpected navigation revision'
+          new=Path('namira-source/namira/app/MobileNavigation.php').read_bytes();assert hashlib.sha256(new).hexdigest()=='7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205'
+          if oldhash!='7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205':
+              backup='_namira_live/backups/mobile-order-3a0066e36027'
+              f.mkd(home+'/'+backup);put(backup+'/MobileNavigation.php',before);put(path,new)
+          assert read(path)==new,'Readback mismatch'
+          f.quit()
+          expected=['خانه','تصاویر','فروشگاه','هنرمندان','حساب کاربری']
+          pages=['home','gallery','shop','artists','member-login']
+          for attempt in range(8):
+              with urlopen(Request('https://naamiraa.ir/index.php?page=home',headers={'Cache-Control':'no-cache'}),timeout=40) as response:html=response.read().decode()
+              labels=re.findall(r'class="nm-bottom-label">([^<]+)</span>',html)
+              if labels==expected:break
+              time.sleep(5)
+          assert labels==expected,'Live menu does not match expected labels'
+          nav=re.search(r'<nav class="nm-bottom-nav".*?</nav>',html,re.S).group()
+          assert re.findall(r'href="[^"]*page=([^"&]+)',nav)==pages,'Unexpected destination order'
+          print('NAMIRAA_MOBILE_ORDER_VERIFIED '+json.dumps({'source':'3a0066e36027bb2222da1885f777a040c94b4e33','labels':labels,'pages':pages,'sha256':'7bbe2536839d65dfff6d248d73684b690ce3d3133358d66598a87e93550d0205'},ensure_ascii=False))
+          PY
