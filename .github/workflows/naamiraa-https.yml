@@ -1,0 +1,60 @@
+name: Verify Naamiraa HTTPS-only entry points
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-https.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  secure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - name: Preserve host configuration and require HTTPS on both new domains
+        run: |
+          python3 - <<'PY'
+          import os,ssl,io,hashlib,json,time,uuid
+          from ftplib import FTP_TLS,error_perm
+          from urllib.request import Request,urlopen,build_opener,HTTPRedirectHandler
+          from urllib.error import HTTPError
+          f=FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();home=f.pwd()
+          def path(p):return home.rstrip('/')+'/'+p
+          def read(p):
+              b=io.BytesIO();f.retrbinary('RETR '+path(p),b.write);return b.getvalue()
+          def mkdir(p):
+              f.cwd(home)
+              for part in p.split('/'):
+                  try:f.cwd(part)
+                  except error_perm:f.mkd(part);f.cwd(part)
+              f.cwd(home)
+          def put(p,raw,private=False):
+              mkdir(p.rsplit('/',1)[0]);tmp=p+'.upload-'+uuid.uuid4().hex;f.storbinary('STOR '+path(tmp),io.BytesIO(raw));f.rename(path(tmp),path(p));f.sendcmd('SITE CHMOD '+('600 ' if private else '644 ')+path(p))
+          backup='_namira_live/backups/https-'+time.strftime('%Y%m%d-%H%M%S');results=[]
+          for folder,domain,surface in [('public_html','naamiraa.ir','public'),('admin.naamiraa.ir','admin.naamiraa.ir','admin')]:
+              entry=read(folder+'/index.php');assert ("NAMIRA_SURFACE', '"+surface+"'").encode() in entry and b'/_namira_live' in entry,'Expected independent Namira entry point required'
+              old=read(folder+'/.htaccess');marker=b'# BEGIN NAMIRAA HTTPS'
+              if marker not in old:
+                  put(backup+'/'+surface+'-htaccess',old,True)
+                  rules=('\n# BEGIN NAMIRAA HTTPS\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteCond %{HTTPS} !=on\nRewriteCond %{REQUEST_URI} !^/\\.well-known/acme-challenge/\nRewriteRule ^ https://'+domain+'%{REQUEST_URI} [R=301,L,NE]\n</IfModule>\n# END NAMIRAA HTTPS\n').encode()
+                  put(folder+'/.htaccess',old+rules)
+              results.append({'domain':domain,'readback_sha256':hashlib.sha256(read(folder+'/.htaccess')).hexdigest()})
+          f.quit()
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self,*a,**kw):return None
+          opener=build_opener(NoRedirect)
+          for item in results:
+              domain=item['domain'];url='http://'+domain+'/index.php?page='+('login' if domain.startswith('admin.') else 'home')
+              try:
+                  with opener.open(Request(url,headers={'User-Agent':'Naamiraa-HTTPS-check'}),timeout=35) as r: code=r.status;location=r.headers.get('Location','')
+              except HTTPError as e:code=e.code;location=e.headers.get('Location','')
+              assert code in [301,302,307,308] and location.startswith('https://'+domain+'/'),(domain,code,'HTTPS redirect not confirmed');item['http_redirect']=code;item['location']=location
+          print('NAAMIRAA_HTTPS_VERIFIED '+json.dumps({'backup':backup,'origins':results}))
+          PY
