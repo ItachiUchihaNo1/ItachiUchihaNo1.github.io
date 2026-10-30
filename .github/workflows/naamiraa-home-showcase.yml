@@ -1,0 +1,104 @@
+name: Deploy Naamiraa home showcase
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-home-showcase.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOME_SOURCE: '333285b2c7f1b5f44e68d08176111b17274483ae'
+      HOME_PLAN: '[{"path":"app/HomeShowcase.php","oldHash":null,"newHash":"a04f8c14314e06dc7e8753729c06aea8910c5c2485f1f6898948a93ee4f54fef"},{"path":"app/HomeShowcaseWeb.php","oldHash":null,"newHash":"2f663d5420cf5495d68392797b4738b5207da8c70edc40bdaeb068519fb1bbbf"},{"path":"app/AdminPanel.php","oldHash":"2daf10834d81241474aea5937873ed2c96eb17b1cf48f77381e484c97c705765","newHash":"7ea0410be6987d0374a234e8f45fe34b2b2cf624c11c6c6c92125909e9297167"},{"path":"app/DomainRouting.php","oldHash":"3483a43231c0986c6ad0d6494a51fc25a7fa68891909b91c90d4ed9ff82cddb7","newHash":"f235f9e8b0515502574a5bcfd36b44bee16e4c8b88bc1ef8dbb5e476095175a0"},{"path":"app/Web.php","oldHash":"dd369233f62a1e1171d99a417aba9ba9ed8e8c6ebec7f0cc48399c099d946cbe","newHash":"2bf1e223e7960e6289cd5354b1585cb4d38adf49635ae8cdfb598dc3e23b2e6f"},{"path":"views/home-showcase.php","oldHash":null,"newHash":"00178b8b687291140c4b6064fbb8e1883192d34b7234ba3714f4a6d86edd8fc6"},{"path":"views/admin-home-showcase.php","oldHash":null,"newHash":"1d0fc3aa326a32173a79572cf103d827c03bd9003f0ab6376f9b4a10825c6260"},{"path":"views/admin-settings.php","oldHash":"23eeb93b86581509f930f52ee2e699ba85a0c2a84fc4a33142e6ce1e53fb2c22","newHash":"9c06a73818900e6fed1ef0014f3eeb17aed16a3ea855e95db08397f1885f1d1d"},{"path":"public/assets/home-showcase.css","oldHash":null,"newHash":"2dfdba0a4bafb141ee664f7e561719695cd0415499060b79fe2013d0683ee6f6"},{"path":"public/assets/home-editor.css","oldHash":null,"newHash":"5a36ed89319d6e098a450c12602d8ba84e7d05c78027dc8b0377768d78c5b18b"},{"path":"public/assets/home-editor.js","oldHash":null,"newHash":"d3b9b79076432e3a2709ab1729210e9c351e1235f3c4271173d994d858ffb51f"},{"path":"app/Security.php","oldHash":"3b34df3e9f5687190f75c701a09e8f09d2f1141233e575598acc579c4c1399f7","newHash":"98a1f1e28f8c332c7b69756371af4e0244657b36ffcef9aa567fd95b7e5278c8"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 333285b2c7f1b5f44e68d08176111b17274483ae
+          path: namira-source
+          persist-credentials: false
+      - name: Require passing tests for the exact source
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request
+          sha=os.environ['HOME_SOURCE']
+          with urllib.request.urlopen('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20') as response:runs=json.load(response)['workflow_runs']
+          assert any(r['name']=='Namira home showcase checks' and r['head_sha']==sha and r['conclusion']=='success' for r in runs),'Passing exact-source home tests required'
+          PY
+      - name: Back up and apply tested home showcase files only
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,time
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['HOME_SOURCE'];plan=json.loads(os.environ['HOME_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          backup='_namira_live/backups/home-showcase-'+source[:12];before={};changed=[]
+          def digest(raw):return hashlib.sha256(raw).hexdigest()
+          def http(url):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache','User-Agent':'Namira-home-showcase-release'}),context=ssl.create_default_context(),timeout=60) as response:return response.status,response.read().decode(),dict(response.headers)
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active private core'
+              for folder,surface in [('public_html','public'),('admin.naamiraa.ir','admin')]:
+                  assert ("NAMIRA_SURFACE', '"+surface+"'").encode() in r.read(folder+'/index.php'),'Unexpected document root entry'
+              jobs=[]
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash'],'Source manifest mismatch'
+                  targets=[folder+'/'+item['path'][7:] for folder in ['public_html','admin.naamiraa.ir']] if item['path'].startswith('public/') else [prefix+'/'+item['path']]
+                  for target in targets:
+                      old=r.maybe(target)
+                      if old is not None:assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected existing revision: '+item['path']
+                      else:assert item['oldHash'] is None,'Expected existing source absent'
+                      jobs.append((target,raw,old,item['path']))
+              # New classes/templates/assets first; shared headers and home dispatch last.
+              priority={'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6}
+              jobs.sort(key=lambda job:priority.get(job[3],0))
+              for target,raw,old,relative in jobs:
+                  before[target]=old
+                  if old==raw:continue
+                  if old is not None:r.put(backup+'/'+relative,old,True)
+                  r.put(target,raw,not relative.startswith('public/'));assert r.read(target)==raw,'Readback mismatch';changed.append(target)
+                  print('VERIFIED_FILE '+relative,flush=True)
+              r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan,'schema_changed':False,'content_records_modified':False}).encode(),True)
+              for attempt in range(10):
+                  status,body,headers=http('https://naamiraa.ir/index.php?page=home')
+                  if status==200 and 'home-showcase' in body and 'data-home-block=' in body:break
+                  time.sleep(5)
+              assert status==200 and 'home-showcase' in body and 'data-home-block=' in body,'Public showcase not confirmed'
+              import re
+              assert re.findall(r'class="nm-bottom-label">([^<]+)</span>',body)==['خانه','تصاویر','فروشگاه','هنرمندان','حساب'],'Mobile navigation changed'
+              code,gallery,_=http('https://naamiraa.ir/index.php?page=gallery');assert code==200 and 'gallery-filters' in gallery,'Gallery regression'
+              code,admin,_=http('https://admin.naamiraa.ir/index.php?page=login');assert code==200 and 'ورود مدیر نامیرا' in admin,'Admin login regression'
+              try:http('https://admin.naamiraa.ir/index.php?page=home-preview');raise AssertionError('Anonymous preview exposed')
+              except HTTPError as error:assert error.code==403,'Unexpected preview authorization status'
+              result={'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'gallery_http':code,'schema_changed':False,'content_records_modified':False,'anonymous_preview':403,'default_blocks_visible':len(re.findall(r'data-home-block=',body))}
+              Path('home-showcase-release.json').write_text(json.dumps(result,indent=2));print('HOME_SHOWCASE_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  if before[target] is not None:
+                      try:r.put(target,before[target],True)
+                      except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              print('Existing changed files restored where connection remained available; private backup retained.',flush=True)
+              raise
+          finally:
+              try:f.quit()
+              except Exception:f.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-home-showcase-release
+          path: home-showcase-release.json
+          retention-days: 14
