@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      HOME_SOURCE: '333285b2c7f1b5f44e68d08176111b17274483ae'
-      HOME_PLAN: '[{"path":"app/HomeShowcase.php","oldHash":null,"newHash":"a04f8c14314e06dc7e8753729c06aea8910c5c2485f1f6898948a93ee4f54fef"},{"path":"app/HomeShowcaseWeb.php","oldHash":null,"newHash":"2f663d5420cf5495d68392797b4738b5207da8c70edc40bdaeb068519fb1bbbf"},{"path":"app/AdminPanel.php","oldHash":"2daf10834d81241474aea5937873ed2c96eb17b1cf48f77381e484c97c705765","newHash":"7ea0410be6987d0374a234e8f45fe34b2b2cf624c11c6c6c92125909e9297167"},{"path":"app/DomainRouting.php","oldHash":"3483a43231c0986c6ad0d6494a51fc25a7fa68891909b91c90d4ed9ff82cddb7","newHash":"f235f9e8b0515502574a5bcfd36b44bee16e4c8b88bc1ef8dbb5e476095175a0"},{"path":"app/Web.php","oldHash":"dd369233f62a1e1171d99a417aba9ba9ed8e8c6ebec7f0cc48399c099d946cbe","newHash":"2bf1e223e7960e6289cd5354b1585cb4d38adf49635ae8cdfb598dc3e23b2e6f"},{"path":"views/home-showcase.php","oldHash":null,"newHash":"00178b8b687291140c4b6064fbb8e1883192d34b7234ba3714f4a6d86edd8fc6"},{"path":"views/admin-home-showcase.php","oldHash":null,"newHash":"1d0fc3aa326a32173a79572cf103d827c03bd9003f0ab6376f9b4a10825c6260"},{"path":"views/admin-settings.php","oldHash":"23eeb93b86581509f930f52ee2e699ba85a0c2a84fc4a33142e6ce1e53fb2c22","newHash":"9c06a73818900e6fed1ef0014f3eeb17aed16a3ea855e95db08397f1885f1d1d"},{"path":"public/assets/home-showcase.css","oldHash":null,"newHash":"2dfdba0a4bafb141ee664f7e561719695cd0415499060b79fe2013d0683ee6f6"},{"path":"public/assets/home-editor.css","oldHash":null,"newHash":"5a36ed89319d6e098a450c12602d8ba84e7d05c78027dc8b0377768d78c5b18b"},{"path":"public/assets/home-editor.js","oldHash":null,"newHash":"d3b9b79076432e3a2709ab1729210e9c351e1235f3c4271173d994d858ffb51f"},{"path":"app/Security.php","oldHash":"3b34df3e9f5687190f75c701a09e8f09d2f1141233e575598acc579c4c1399f7","newHash":"98a1f1e28f8c332c7b69756371af4e0244657b36ffcef9aa567fd95b7e5278c8"}]'
+      HOME_SOURCE: '192cdc204f3a45642a739d869081c0c8b1e2a9c6'
+      HOME_PLAN: '[{"path":"views/home-showcase.php","oldHash":"00178b8b687291140c4b6064fbb8e1883192d34b7234ba3714f4a6d86edd8fc6","newHash":"83fffcd1946c3398795ab14dce291b48971e7f502806953e7ceb5f7d1b1c6b33"}]'
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
@@ -23,16 +23,21 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 333285b2c7f1b5f44e68d08176111b17274483ae
+          ref: 192cdc204f3a45642a739d869081c0c8b1e2a9c6
           path: namira-source
           persist-credentials: false
       - name: Require passing tests for the exact source
         run: |
           python3 - <<'PY'
-          import os,json,urllib.request
+          import os,json,urllib.request,time
           sha=os.environ['HOME_SOURCE']
-          with urllib.request.urlopen('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20') as response:runs=json.load(response)['workflow_runs']
-          assert any(r['name']=='Namira home showcase checks' and r['head_sha']==sha and r['conclusion']=='success' for r in runs),'Passing exact-source home tests required'
+          for attempt in range(30):
+              with urllib.request.urlopen('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20') as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira home showcase checks' and r['head_sha']==sha]
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Home showcase tests did not pass')
+              time.sleep(10)
+          else:raise RuntimeError('Passing exact-source home tests required')
           PY
       - name: Back up and apply tested home showcase files only
         run: |
