@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      HOME_SOURCE: '192cdc204f3a45642a739d869081c0c8b1e2a9c6'
-      HOME_PLAN: '[{"path":"views/home-showcase.php","oldHash":"00178b8b687291140c4b6064fbb8e1883192d34b7234ba3714f4a6d86edd8fc6","newHash":"83fffcd1946c3398795ab14dce291b48971e7f502806953e7ceb5f7d1b1c6b33"}]'
+      HOME_SOURCE: '8f8ad6322f34889431e1b79bfd305f9f7a748d8e'
+      HOME_PLAN: '[{"path":"views/home-showcase.php","newHash":"e8cb96572c45a31669fb8a793c523cf4f35f9a6b44e5256b4aa2b80491f790f6","oldHash":"83fffcd1946c3398795ab14dce291b48971e7f502806953e7ceb5f7d1b1c6b33"},{"path":"public/assets/home-showcase.css","newHash":"8e19a06e66f9c9b9739072106ab75ed6f5a9f77afd23dd1e804e0ff38e8bdc8b","oldHash":"2dfdba0a4bafb141ee664f7e561719695cd0415499060b79fe2013d0683ee6f6"}]'
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 192cdc204f3a45642a739d869081c0c8b1e2a9c6
+          ref: 8f8ad6322f34889431e1b79bfd305f9f7a748d8e
           path: namira-source
           persist-credentials: false
       - name: Require passing tests for the exact source
@@ -72,7 +72,7 @@ jobs:
                       else:assert item['oldHash'] is None,'Expected existing source absent'
                       jobs.append((target,raw,old,item['path']))
               # New classes/templates/assets first; shared headers and home dispatch last.
-              priority={'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6}
+              priority={'views/home-showcase.php':1,'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6}
               jobs.sort(key=lambda job:priority.get(job[3],0))
               for target,raw,old,relative in jobs:
                   before[target]=old
