@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      HOME_SOURCE: '8f8ad6322f34889431e1b79bfd305f9f7a748d8e'
-      HOME_PLAN: '[{"path":"views/home-showcase.php","newHash":"e8cb96572c45a31669fb8a793c523cf4f35f9a6b44e5256b4aa2b80491f790f6","oldHash":"83fffcd1946c3398795ab14dce291b48971e7f502806953e7ceb5f7d1b1c6b33"},{"path":"public/assets/home-showcase.css","newHash":"8e19a06e66f9c9b9739072106ab75ed6f5a9f77afd23dd1e804e0ff38e8bdc8b","oldHash":"2dfdba0a4bafb141ee664f7e561719695cd0415499060b79fe2013d0683ee6f6"}]'
+      HOME_SOURCE: '86663fd765f5b6c385f87e0d85c0ee50d6398e5e'
+      HOME_PLAN: '[{"path":"views/home-showcase.php","newHash":"c29914ebdb8f6afe0c92419badf5915b3a689d1a7666f284d948254e22b284b6","oldHash":"e8cb96572c45a31669fb8a793c523cf4f35f9a6b44e5256b4aa2b80491f790f6"},{"path":"public/assets/home-showcase.css","newHash":"d17c0a1a040f0a027fad6054a8f2bd95e33fd73d1ce9ba9f94241283314f5509","oldHash":"8e19a06e66f9c9b9739072106ab75ed6f5a9f77afd23dd1e804e0ff38e8bdc8b"}]'
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 8f8ad6322f34889431e1b79bfd305f9f7a748d8e
+          ref: 86663fd765f5b6c385f87e0d85c0ee50d6398e5e
           path: namira-source
           persist-credentials: false
       - name: Require passing tests for the exact source
