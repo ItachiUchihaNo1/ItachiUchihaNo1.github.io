@@ -1,0 +1,51 @@
+name: One authorized Naamiraa SMS test
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-sms-once.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOME_SOURCE: '8ac2c2490cd418e982cd54aa0272b6200230927d'
+      HOME_PLAN: '[{"path":"app/Env.php","oldHash":"1c4e6b9e789b54a19d7365cd3d4560008126e5c2d8c77b40dafaa5af6ec814ae","newHash":"e51d3a92b16f9c0055333be491b9a62aadfb267253e25cd266fdbddf0700e0de"},{"path":"app/TsmsClient.php","oldHash":"a7c0c1110ccd5ed0c1b24d22234ca973ad6c2a4eaeca1d117f4e0bb563ff67e7","newHash":"f412f2f7b31006bdde52165d8d9b9634005fdfd9853e866f0907a52ac1401a7b"},{"path":"app/SmsService.php","oldHash":"87cbab4013f5208ffebe7f4c1691d159e02c4bcda3b8cb5c4bcb2c662ad3b43f","newHash":"f7c67fb7791df2fd9f845cc11e3334f2c17d02d75471c449d0cb179a2610fdf3"},{"path":"app/MobileAuth.php","oldHash":"9cf788c79da28cc9290a36f9fbf1e4351210228380a71a0f3a50542a3987dd42","newHash":"11a9f2d7462da86a48d4baafbc0db0af7bda415b8805d83832a7382769460cef"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 8ac2c2490cd418e982cd54aa0272b6200230927d
+          path: namira-source
+          persist-credentials: false
+      - name: Read sanitized configuration and recent SMS error types - no send
+        run: |
+          python3 - <<'PY'
+          PHP_SOURCE="<?php\ndeclare(strict_types=1);\nini_set('display_errors','0');header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store');\nif(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_DIAGNOSTIC']??''))){http_response_code(404);exit;}\ntry{\n define('NAMIRA_SURFACE','public');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';\n $db=Namira\\Db::connect();$mobiles=Namira\\Db::query($db,'SELECT DISTINCT mobile FROM otp_challenges')->fetchAll(PDO::FETCH_COLUMN);\n if(count($mobiles)!==1){echo json_encode(['sent'=>false,'reason'=>'recipient-not-unique']);exit;}$mobile=$mobiles[0];\n $event='authorized-single-test-20261101-namira-01';\n $marker=Namira\\Env::storage().'/.'.hash('sha256',$event).'.once';$lock=@fopen($marker,'x');if(!$lock){echo json_encode(['sent'=>false,'reason'=>'already-attempted-no-resend']);exit;}fwrite($lock,'authorized single test');fclose($lock);chmod($marker,0600);\n $code=(string)random_int(100000,999999);$message=\"نامیرا\\nکد آزمایش: \".$code.\"\\nاین کد برای ورود نیست.\";\n $bucket='sms-once-'.hash_hmac('sha256',$mobile.'|notice:'.$event,Namira\\SmsService::secret());$suffix=substr($bucket,-16);\n try{$receipt=(new Namira\\SmsService($db))->notify($mobile,$message,$event);$out=['attempted_once'=>true,'provider_reply'=>$receipt,'accepted_by_parser'=>$receipt!==false];}\n catch(Throwable $e){$target=Namira\\Db::query($db,\"SELECT target FROM audit_logs WHERE action='sms.failed' AND target LIKE ? ORDER BY id DESC LIMIT 1\",['event='.$suffix.'%'])->fetchColumn();preg_match('/kind=(provider-[0-9]+|unconfirmed)/',(string)$target,$match);$out=['attempted_once'=>true,'accepted_by_parser'=>false,'failure_kind'=>$match[1]??'unknown'];}\n if(isset($receipt)&&is_string($receipt)&&preg_match('/^[0-9,]+$/D',$receipt)){\n  $query=['from'=>Namira\\Env::get('TSMS_SENDER'),'username'=>Namira\\Env::get('TSMS_USERNAME'),'password'=>Namira\\Env::get('TSMS_PASSWORD'),'deliver20'=>$receipt];\n  $ch=curl_init(Namira\\TsmsClient::SEND_URL.'?'.http_build_query($query,'','&',PHP_QUERY_RFC3986));curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>15,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS]);$body=curl_exec($ch);$out['delivery_http']=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$out['delivery_curl_errno']=curl_errno($ch);curl_close($ch);$body=is_string($body)?trim($body):'';$out['delivery_response']=preg_match('/^-?[0-9,]{1,80}$/D',$body)?$body:'unrecognized';\n }\n echo json_encode($out,JSON_UNESCAPED_UNICODE);\n}catch(Throwable $e){http_response_code(503);echo json_encode(['error_class'=>get_class($e),'no_automatic_retry'=>true]);}\n"
+          import os,sys,json,ssl,secrets,hashlib
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=45);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          key=secrets.token_hex(32);name='namira-sms-test-'+secrets.token_hex(16)+'.php';target='public_html/'+name
+          try:
+              r.put(target,PHP_SOURCE.replace('__HASH__',hashlib.sha256(key.encode()).hexdigest()).encode())
+              req=Request('https://naamiraa.ir/'+name,headers={'X-Namira-Diagnostic':key,'Cache-Control':'no-cache'})
+              with urlopen(req,context=ssl.create_default_context(),timeout=90) as response:data=json.load(response)
+              print('AUTHORIZED_SINGLE_SMS_RESULT '+json.dumps(data),flush=True)
+          finally:
+              try:r.remove_created(target);print('TEMPORARY_TEST_REMOVED',flush=True)
+              finally:
+                  try:f.quit()
+                  except Exception:f.close()
+          
+          PY
