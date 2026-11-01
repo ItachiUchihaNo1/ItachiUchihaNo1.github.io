@@ -166,8 +166,9 @@ final class Consultations
         $createdAt=time();$this->db->run('INSERT INTO m_messages(booking_id,sender_id,client_key,body,created_at) VALUES(?,?,?,?,?)',[$id,$a['user_id'],$key,$body,$createdAt]);return ['id'=>(int)$this->db->pdo->lastInsertId(),'body'=>$body,'created_at'=>$createdAt];});}
     public function archive(array $a,string $id,int $after=0):array
     {
+        $this->data->storage();
         if(($a['realm']??'')==='admin'){$this->policy->admin($a);$grant=$this->db->one('SELECT id FROM m_archive_grants WHERE booking_id=? AND reviewer_id=? AND expires_at>? AND revoked_at IS NULL',[$id,$a['user_id'],time()]);if(!$grant){throw new Problem('ARCHIVE_GRANT_REQUIRED','مجوز موردی معتبر برای این آرشیو لازم است.',403);}$this->audit->add($a['user_id'],'admin','archive.read',$id);}
         else{$this->booking($a,$id);}
-        return $this->db->all('SELECT id,sender_id,body,created_at FROM m_messages WHERE booking_id=? AND id>? ORDER BY id LIMIT 100',[$id,max(0,$after)]);
+        return (new ChatFiles($this->db))->decorate($this->db->all('SELECT m.id,m.sender_id,m.body,m.created_at,u.display_name AS sender_name FROM m_messages m JOIN m_users u ON u.id=m.sender_id WHERE m.booking_id=? AND m.id>? ORDER BY m.id LIMIT 100',[$id,max(0,$after)]));
     }
 }

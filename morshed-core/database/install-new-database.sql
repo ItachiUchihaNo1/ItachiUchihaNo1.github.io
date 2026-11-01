@@ -296,6 +296,10 @@ CREATE TABLE m_private_files (
  FOREIGN KEY(booking_id) REFERENCES m_bookings(id), FOREIGN KEY(owner_id) REFERENCES m_users(id), INDEX(booking_id,created_at),
  CHECK(byte_size BETWEEN 1 AND 5242880)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE m_chat_message_files (
+ message_id BIGINT UNSIGNED PRIMARY KEY, file_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ INDEX(file_id), FOREIGN KEY(message_id) REFERENCES m_messages(id), FOREIGN KEY(file_id) REFERENCES m_private_files(id)
+) ENGINE=InnoDB;
 CREATE TABLE m_notification_templates (
  id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, name VARCHAR(120) NOT NULL,
  title VARCHAR(180) NOT NULL, body TEXT NOT NULL, created_by CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

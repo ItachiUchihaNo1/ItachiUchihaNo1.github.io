@@ -27,12 +27,17 @@ final class ChatRooms {
   else{try{(new Consultations($this->db,new Audit($this->db)))->writable($a,$id);$allowed=true;$reason='گفت‌وگو فعال است.';}catch(Problem $e){$reason=$e->getMessage();$code=$e->errorCode;}}
   return ['booking'=>$b,'booking_state'=>$b['state'],'can_send'=>$allowed,'reason'=>$reason,'block_code'=>$code,'server_time'=>$now,'starts_at'=>(int)$b['starts_at'],'ends_at'=>(int)$b['ends_at']];
  }
- private function dto(array $a,array $rows):array {return array_map(fn($r)=>['id'=>(int)$r['id'],'body'=>$r['body'],'created_at'=>(int)$r['created_at'],'own'=>$r['sender_id']===$a['user_id']],$rows);}
+ private function dto(array $a,array $rows):array {return array_map(fn($r)=>['id'=>(int)$r['id'],'body'=>$r['body'],'created_at'=>(int)$r['created_at'],'own'=>$r['sender_id']===$a['user_id'],'attachment'=>$r['attachment']],(new ChatFiles($this->db))->decorate($rows));}
  public function read(array $a,string $id,int $after=0,int $before=0,bool $initial=false):array {
   $s=$this->state($a,$id);$after=Policy::integer($after,0,PHP_INT_MAX);$before=Policy::integer($before,0,PHP_INT_MAX);
   if($before||$initial){$rows=$this->db->all('SELECT id,sender_id,body,created_at FROM m_messages WHERE booking_id=?'.($before?' AND id<?':'').' ORDER BY id DESC LIMIT 51',$before?[$id,$before]:[$id]);$more=count($rows)>50;$rows=array_reverse(array_slice($rows,0,50));}
   else{$rows=$this->db->all('SELECT id,sender_id,body,created_at FROM m_messages WHERE booking_id=? AND id>? ORDER BY id LIMIT 101',[$id,$after]);$more=count($rows)>100;$rows=array_slice($rows,0,100);}
   return array_diff_key($s,['booking'=>1])+['messages'=>$this->dto($a,$rows),'more'=>$more];
+ }
+ public function sendFile(array $a,string $id,string $key,array $file):array {
+  (new PrivateFiles($this->db,new Audit($this->db)))->upload($a,$id,$file,$key);
+  $row=$this->db->one('SELECT id,sender_id,body,created_at FROM m_messages WHERE booking_id=? AND sender_id=? AND client_key=?',[$id,$a['user_id'],$key]);
+  return ['message'=>$this->dto($a,[$row])[0],'server_time'=>time()];
  }
  public function send(array $a,string $id,string $key,string $body):array {
   if(!preg_match('/^[a-zA-Z0-9_-]{12,64}$/D',$key))throw new Problem('INVALID_INPUT','شناسهٔ پیام معتبر نیست.');$s=$this->state($a,$id);if(!$s['can_send'])throw new Problem('CHAT_CLOSED',$s['reason'],409);$m=(new Consultations($this->db,new Audit($this->db)))->message($a,$id,$key,$body,true);return ['message'=>['id'=>$m['id'],'body'=>$m['body'],'created_at'=>$m['created_at'],'own'=>true],'server_time'=>time(),'ends_at'=>$s['ends_at']];

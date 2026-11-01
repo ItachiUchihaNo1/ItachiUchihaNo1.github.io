@@ -425,6 +425,8 @@ echo "PASS all database rows restored and old authentication invalidated\nPASS c
     subprocess.run([sys.executable,str(app/'tests/membership28_race.py'),str(scratch),str(php)],check=True)
     php_run('chat29_fixture.php')
     subprocess.run([sys.executable,str(app/'tests/chat29_http.py'),str(scratch),str(php)],check=True)
+    php_run('chat33_fixture.php')
+    subprocess.run([sys.executable,str(app/'tests/chat33_http.py'),str(scratch),str(php)],check=True)
     php_run('slots31.php')
     subprocess.run([sys.executable,str(app/'tests/slots31_http.py'),str(scratch)],check=True)
     for log_name in ['site.log','admin.log']:

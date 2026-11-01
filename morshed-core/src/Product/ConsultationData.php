@@ -26,6 +26,7 @@ final class ConsultationData
             try{$this->db->run('ALTER TABLE m_schedule_settings ADD COLUMN lead_minutes INT NULL DEFAULT NULL');}
             catch(\PDOException $race){if((int)($race->errorInfo[1]??0)!==1060)throw $race;$this->db->run('SELECT lead_minutes FROM m_schedule_settings LIMIT 0');}
         }
+        (new ChatFiles($this->db))->storage();
         $this->ready=true;$this->db->markFeatureReady('consultations14');
     }
 }
