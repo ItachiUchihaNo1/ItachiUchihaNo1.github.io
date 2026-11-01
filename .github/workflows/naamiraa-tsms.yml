@@ -1,4 +1,4 @@
-name: Deploy Naamiraa TSMS module disabled
+name: Deploy Naamiraa simple SMS configuration
 on:
   push:
     branches: [main]
@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      HOME_SOURCE: 'f464ba66fda9790d73bcfeb7b11c059e9482670e'
-      HOME_PLAN: '[{"path":"app/TsmsClient.php","oldHash":null,"newHash":"a7c0c1110ccd5ed0c1b24d22234ca973ad6c2a4eaeca1d117f4e0bb563ff67e7"},{"path":"app/SmsService.php","oldHash":null,"newHash":"87cbab4013f5208ffebe7f4c1691d159e02c4bcda3b8cb5c4bcb2c662ad3b43f"},{"path":"app/MobileAuth.php","oldHash":"37a51dcf4c73bbe8c19a879edcb912bb3d99467c69ff57fb6364438b5b2f250b","newHash":"9cf788c79da28cc9290a36f9fbf1e4351210228380a71a0f3a50542a3987dd42"}]'
+      HOME_SOURCE: '8ac2c2490cd418e982cd54aa0272b6200230927d'
+      HOME_PLAN: '[{"path":"app/Env.php","oldHash":"1c4e6b9e789b54a19d7365cd3d4560008126e5c2d8c77b40dafaa5af6ec814ae","newHash":"e51d3a92b16f9c0055333be491b9a62aadfb267253e25cd266fdbddf0700e0de"},{"path":"app/TsmsClient.php","oldHash":"a7c0c1110ccd5ed0c1b24d22234ca973ad6c2a4eaeca1d117f4e0bb563ff67e7","newHash":"f412f2f7b31006bdde52165d8d9b9634005fdfd9853e866f0907a52ac1401a7b"},{"path":"app/SmsService.php","oldHash":"87cbab4013f5208ffebe7f4c1691d159e02c4bcda3b8cb5c4bcb2c662ad3b43f","newHash":"f7c67fb7791df2fd9f845cc11e3334f2c17d02d75471c449d0cb179a2610fdf3"},{"path":"app/MobileAuth.php","oldHash":"9cf788c79da28cc9290a36f9fbf1e4351210228380a71a0f3a50542a3987dd42","newHash":"11a9f2d7462da86a48d4baafbc0db0af7bda415b8805d83832a7382769460cef"}]'
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: f464ba66fda9790d73bcfeb7b11c059e9482670e
+          ref: 8ac2c2490cd418e982cd54aa0272b6200230927d
           path: namira-source
           persist-credentials: false
       - name: Require passing tests for the exact source
@@ -54,7 +54,7 @@ jobs:
           import domains as d
           source=os.environ['HOME_SOURCE'];plan=json.loads(os.environ['HOME_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
           f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
-          backup='_namira_live/backups/tsms-'+source[:12];before={};changed=[]
+          backup='_namira_live/backups/tsms-simple-'+source[:12];before={};changed=[]
           def digest(raw):return hashlib.sha256(raw).hexdigest()
           def http(url):
               with urlopen(Request(url,headers={'Cache-Control':'no-cache','User-Agent':'Namira-home-showcase-release'}),context=ssl.create_default_context(),timeout=60) as response:return response.status,response.read().decode(),dict(response.headers)
@@ -71,8 +71,11 @@ jobs:
                       if old is not None:assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected existing revision: '+item['path']
                       else:assert item['oldHash'] is None,'Expected existing source absent'
                       jobs.append((target,raw,old,item['path']))
-              # New classes/templates/assets first; shared headers and home dispatch last.
-              priority={'views/home-showcase.php':1,'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6,'views/layout.php':7,'app/MobileAuth.php':8}
+              key_path='_namira_live/.otp-secret';existing_key=r.maybe(key_path);key_created=existing_key is None
+              if key_created:r.put(key_path,__import__('secrets').token_hex(32).encode(),True)
+              else:assert len(existing_key.strip())>=32,'Private OTP key is invalid'
+              # Existing credentials/config JSON are never changed.
+              priority={'views/home-showcase.php':1,'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6,'views/layout.php':7,'app/MobileAuth.php':8,'app/Env.php':9}
               jobs.sort(key=lambda job:priority.get(job[3],0))
               for target,raw,old,relative in jobs:
                   before[target]=old
@@ -83,13 +86,15 @@ jobs:
               r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan,'schema_changed':False,'content_records_modified':False}).encode(),True)
               status,body,headers=http('https://naamiraa.ir/')
               assert status==200 and 'home-showcase' in body,'Homepage regression'
-              code,login,_=http('https://naamiraa.ir/login?mode=otp');assert code==200 and 'mobile-request' in login and 'disabled' in login and 'ارسال کد واقعی فعلاً فعال نیست' in login,'OTP unexpectedly activated'
+              code,login,_=http('https://naamiraa.ir/login?mode=otp');assert code==200 and 'mobile-request' in login,'OTP entry unavailable'
+              import re
+              forms=re.findall(r'<form\b[^>]*>.*?</form>',login,re.S);otp_form=next(form for form in forms if 'value="mobile-request"' in form);otp_enabled=not bool(re.search(r'<button\b[^>]*\bdisabled\b',otp_form))
               code,password,_=http('https://naamiraa.ir/login');assert code==200 and 'mobile-password' in password,'Password login regression'
               code,signup,_=http('https://naamiraa.ir/login?mode=register');assert code==200 and 'mobile-request' in signup,'Registration entry regression'
               code,admin,_=http('https://admin.naamiraa.ir/index.php?page=login');assert code==200 and 'ورود مدیر نامیرا' in admin,'Admin login regression'
               code,payload,_=http('https://naamiraa.ir/index.php?page=gallery-data&mode=preview');assert code==200 and json.loads(payload)['ok'],'Gallery API regression'
-              result={'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'otp_page_http':200,'otp_enabled':False,'password_login_preserved':True,'admin_login_preserved':True,'schema_changed':False,'config_changed':False,'content_records_modified':False,'real_sms_sent':0}
-              Path('home-showcase-release.json').write_text(json.dumps(result,indent=2));print('TSMS_DISABLED_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+              result={'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'otp_page_http':200,'otp_enabled':otp_enabled,'private_key_created':key_created,'password_login_preserved':True,'admin_login_preserved':True,'schema_changed':False,'config_changed':False,'content_records_modified':False,'real_sms_sent':0}
+              Path('home-showcase-release.json').write_text(json.dumps(result,indent=2));print('TSMS_SIMPLE_RELEASE_VERIFIED '+json.dumps(result),flush=True)
           except Exception:
               for target in reversed(changed):
                   if before[target] is not None:
