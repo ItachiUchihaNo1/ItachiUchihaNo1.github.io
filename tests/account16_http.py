@@ -32,7 +32,7 @@ assert image_status(second)==(200,image)
 assert image_status(guest)[0]==404 and image_status(other)[0]==404
 account_page=second.get('/account');assert 'nav-avatar' not in account_page and asset in account_page
 nav=guest.get('/').split('aria-label="ناوبری اصلی"')[1].split('</nav>')[0]
-assert 'اطلس' in nav and 'جلسات' not in nav and nav.count('<a ')==5
+assert 'جلسات' in nav and 'اطلس' not in nav and nav.count('<a ')==5
 home=guest.get('/');assert 'header-account' not in home and 'site-menu' in home and 'ورود/ثبت نام' in home
 assert 'اطلس مرشد' in guest.get('/atlas')
 stale=guest.get('/slots?mentor_id='+p['mentor_id']+'&date=2020-01-01&duration_minutes=15')
@@ -43,4 +43,4 @@ second.post('/account/avatar',{'remove':'1'});assert 'class="nav-avatar"' not in
 assert image_status(second)[0]==200 # Removing the selected photo doesn't delete a shared owned asset.
 assert upload(other)[0]==200
 assert other.get('/api/v1/mentor/calendar')['settings'] # Personal photo must not demote mentor to review.
-print('PASS UI16 HTTP: private avatar upload, CSRF, image validation, cross-device persistence, access isolation, removal, mentor role preservation, five-tab atlas nav, home topic cards and stale-date recovery')
+print('PASS UI16 HTTP: private avatar upload, CSRF, image validation, cross-device persistence, access isolation, removal, mentor role preservation, five-tab session nav, home topic cards and stale-date recovery')
