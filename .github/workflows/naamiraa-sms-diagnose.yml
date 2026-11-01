@@ -30,40 +30,24 @@ jobs:
       - name: Read sanitized configuration and recent SMS error types - no send
         run: |
           python3 - <<'PY'
-          import os,sys,json,ssl,re,socket
-          from urllib.request import Request,urlopen,build_opener,HTTPRedirectHandler,HTTPSHandler
-          from urllib.error import HTTPError,URLError
+          PHP_SOURCE="<?php\ndeclare(strict_types=1);\nini_set('display_errors','0');\nheader('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store');\nif(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_DIAGNOSTIC']??''))){http_response_code(404);exit;}\ntry{\n define('NAMIRA_SURFACE','public');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';\n $db=Namira\\Db::connect();$out=['ready'=>Namira\\MobileAuth::available(),'sender_looks_like_mobile'=>preg_match('/^09[0-9]{9}$/D',Namira\\Env::get('TSMS_SENDER'))===1,'curl_present'=>function_exists('curl_init')];\n $rows=Namira\\Db::query($db,'SELECT delivered,consumed_at,expires_at,created_at FROM otp_challenges ORDER BY created_at DESC LIMIT 5')->fetchAll();$out['recent_challenges']=array_map(fn($r)=>['age_seconds'=>time()-(int)$r['created_at'],'provider_accepted'=>(bool)$r['delivered'],'consumed'=>$r['consumed_at']!==null,'expired'=>(int)$r['expires_at']<time()],$rows);\n $out['send_attempt_states']=Namira\\Db::query($db,\"SELECT hits,COUNT(*) AS total FROM rate_limits WHERE bucket LIKE 'sms-once-%' AND expires>? GROUP BY hits\",[time()])->fetchAll();\n $out['transport']=[];\n foreach(['https://tsms.ir/url/tsmshttp.php','https://www.tsms.ir/url/tsmshttp.php','http://tsms.ir/url/tsmshttp.php'] as $url){\n  $ch=curl_init($url);curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>10,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_USERAGENT=>'Namira-TSMS-Diagnostics/1.0']);$body=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$errno=curl_errno($ch);curl_close($ch);$body=is_string($body)?trim($body):'';\n  $out['transport'][]=['scheme'=>parse_url($url,PHP_URL_SCHEME),'host'=>parse_url($url,PHP_URL_HOST),'http'=>$status,'curl_errno'=>$errno,'bytes'=>strlen($body),'public_no_credentials_numeric_reply'=>preg_match('/^-?[0-9]{1,20}$/D',$body)?$body:null,'html'=>str_contains(strtolower($body),'<html')];\n }\n echo json_encode($out,JSON_UNESCAPED_UNICODE);\n}catch(Throwable $e){http_response_code(503);echo json_encode(['error_class'=>get_class($e)]);}\n"
+          import os,sys,json,ssl,secrets,hashlib
+          from urllib.request import Request,urlopen
           sys.path.insert(0,'namira-source/namira/deploy')
           import domains as d
           f=d.FTP_TLS(context=ssl.create_default_context(),timeout=45);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          key=secrets.token_hex(32);name='namira-sms-diagnostic-'+secrets.token_hex(16)+'.php';target='public_html/'+name
           try:
-              raw=r.read('_namira_live/config.local.json');cfg=json.loads(raw);sms=cfg.get('sms',{})
-              result={'nested_sms':isinstance(sms,dict) and bool(sms),'enabled':sms.get('enabled') in [True,'1'],'username_present':bool(str(sms.get('username','')).strip()),'password_present':bool(str(sms.get('password','')).strip()),'sender_numeric':bool(re.fullmatch(r'\+?[0-9]{3,20}',str(sms.get('sender','')))),'private_key_present':bool(r.maybe('_namira_live/.otp-secret'))}
-              key=r.maybe('_namira_live/.otp-secret');result['private_key_length_valid']=key is not None and len(key.strip())>=32
-              events=[]
-              for path in ['public_html/error_log','admin.naamiraa.ir/error_log','_namira_live/storage/error.log']:
-                  try:
-                      size=f.size(r.path(path))
-                      if not size:continue
-                      chunks=[];f.retrbinary('RETR '+r.path(path),chunks.append,rest=max(0,size-131072));tail=b''.join(chunks).decode('utf-8','replace')
-                      for line in tail.splitlines():
-                          m=re.search(r'Namira SMS: (?:event=([a-f0-9]{16}) kind=(provider-[0-9]+|unconfirmed)|send not confirmed; event=([a-f0-9]{16}))',line)
-                          if m:events.append({'kind':m.group(2) or 'unconfirmed','source':'public' if path.startswith('public_html') else 'other'})
-                  except Exception:pass
-              result['recent_sms_events']=events[-8:]
-              print('SMS_READ_ONLY_AUDIT '+json.dumps(result),flush=True)
+              php=PHP_SOURCE.replace('__HASH__',hashlib.sha256(key.encode()).hexdigest()).encode()
+              r.put(target,php)
+              req=Request('https://naamiraa.ir/'+name,headers={'X-Namira-Diagnostic':key,'Cache-Control':'no-cache'})
+              with urlopen(req,context=ssl.create_default_context(),timeout=90) as response:data=json.load(response)
+              print('HOST_SMS_READ_ONLY '+json.dumps(data),flush=True)
           finally:
-              try:f.quit()
-              except Exception:f.close()
-          class NoRedirect(HTTPRedirectHandler):
-              def redirect_request(self,*args,**kwargs):return None
-          opener=build_opener(HTTPSHandler(context=ssl.create_default_context()),NoRedirect())
-          for url in ['https://tsms.ir/url/tsmshttp.php','https://www.tsms.ir/url/tsmshttp.php']:
-              try:
-                  response=opener.open(Request(url,method='HEAD'),timeout=15);result={'status':response.status}
-              except HTTPError as error:result={'status':error.code,'redirect':(error.headers.get('Location','').split('?')[0] if error.code in [301,302,303,307,308] else '')}
-              except Exception as error:result={'error_type':type(error).__name__,'reason_type':type(getattr(error,'reason',None)).__name__}
-              print('TSMS_NO_CREDENTIAL_HEAD '+json.dumps({'host':'www' if '//www.' in url else 'base',**result}),flush=True)
+              try:r.remove_created(target);print('TEMPORARY_DIAGNOSTIC_REMOVED',flush=True)
+              finally:
+                  try:f.quit()
+                  except Exception:f.close()
           print('NO_SMS_SENT')
           
           PY
