@@ -1,0 +1,154 @@
+name: Deploy Naamiraa public clean URLs
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-clean-urls.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOME_SOURCE: '572b3647f6f5077e05daf8b4b972b9ba977d5137'
+      HOME_PLAN: '[{"path":"app/CleanUrls.php","oldHash":null,"newHash":"8a66e6ee29f75f1ba44bd1d7642c0e0cd47b2b268e86d68e2cc444cb577096d0"},{"path":"app/DomainRouting.php","oldHash":"f235f9e8b0515502574a5bcfd36b44bee16e4c8b88bc1ef8dbb5e476095175a0","newHash":"63a716d6392cf90f5cf9d7b46bf0d0d78761d5fdc615e475c5361c033f2a5cad"},{"path":"app/Web.php","oldHash":"77c789f8ab9dd07e5f840af2d9192097ebc283291de4f416288f37373a3c46a8","newHash":"cd8db416c5e2b9a76a318351b597f774aa6bcf8c1c75518b0bc9598a3ec2fcdb"},{"path":"app/bootstrap.php","oldHash":"0318663187397f5e94b5ec6f30cc61709a8287250cfd8f1bbf3a3c9850ce1c51","newHash":"87206c5b97f1484487d8e95f3de79f0d79785e323924db0424fdde8b9e739c26"},{"path":"app/StoreSeo.php","oldHash":"b369bb27ad102100b094ea0de3789e05099622a533e3c410ebd7f156db454c8f","newHash":"4ae21d1eab4f9cbe632e0fb7ba2213d111bcb0ef16799077a24fe04289adad0d"},{"path":"public/assets/gallery-filters.js","oldHash":"496c281b37198f8c76063c7b0f18e4e055de0b320966a4376fc0ec8bbaaa21a1","newHash":"69bdf8f0f420415ed8d7c3c76922387895d0b7c21e3e8c7c132054f3795d5a93"},{"path":"public/assets/mobile-navigation.js","oldHash":"aae31ef1c7afdb7f089f1cb6c2e4ca1707851157feb72e47f386a751c223cf5d","newHash":"dc8a986614fec615bb939f1f50f6ce6c0bbe2a311e00015449965d2ac4954daa"},{"path":"public/assets/calls.js","oldHash":"390f1c05ffc8d51b0250c44a5bd2ddf61b7997023dc49910638156e54aabba92","newHash":"e8e376081a81756749e0d9d07acef78f079089c3d35fcf7543732cb7d140e3c5"},{"path":"public/assets/store.js","oldHash":"ca377b3ce37235b5d66e59368ecb2c72538296dd46dcfac7c4232f8e2679a57f","newHash":"4bae4638ed06c18acc9bb51d327ae7d072f335fe0cc7e2152570cf2aa0b1ea9d"},{"path":"views/layout.php","oldHash":"3ce6f11ac0465f07aadc27179548f504a962c3d4e625ee5fe680fed4f6cee44a","newHash":"9a9bbc254aa29dbfd128621b296a427f1e2f16c0f3e588ea31ed93d72d56f014"},{"path":"views/gallery-filter-bar.php","oldHash":"af09a0679f4edd42c236d367c92fd2cf78c82971628d15d248950ba61065df40","newHash":"083f50460a2158568e505a2248e1f2d4afc2aac1347445950f70c29bf813e959"},{"path":"views/calls-assets.php","oldHash":"3a9792dc472d878d3f14f6f2e99df6e24f98ffedbb105882dc310b7ea72c326d","newHash":"c781f22c9ac131bb2205e6027a10c0ce03df1b7b39a53987957ce86c878902c4"},{"path":"views/store-catalog.php","oldHash":"e6c57a9633c6f952b389d655f623537e57d2be905269942f9ad5ea16e0e773fa","newHash":"3cedf4263dc802ac12ee6ec8e3aeb25cb0aac10eb529969ec78e9a2cf190c9a9"},{"path":"public/robots.txt","oldHash":null,"newHash":"ed88aec17e23583e563c597a20fb68d7ca40620a664de58521b3ed605eda43fa"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 572b3647f6f5077e05daf8b4b972b9ba977d5137
+          path: namira-source
+          persist-credentials: false
+      - name: Require passing tests for the exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,time
+          sha=os.environ['HOME_SOURCE']
+          for attempt in range(30):
+              request=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'Naamiraa-home-source-gate','Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira clean URL checks' and r['head_sha']==sha]
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Home showcase tests did not pass')
+              time.sleep(10)
+          else:raise RuntimeError('Passing exact-source home tests required')
+          PY
+      - name: Back up and apply tested directory files only
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,time
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['HOME_SOURCE'];plan=json.loads(os.environ['HOME_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          backup='_namira_live/backups/clean-urls-'+source[:12];before={};changed=[];owns_pending=False
+          def digest(raw):return hashlib.sha256(raw).hexdigest()
+          def http(url):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache','User-Agent':'Namira-home-showcase-release'}),context=ssl.create_default_context(),timeout=60) as response:return response.status,response.read().decode(),dict(response.headers)
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active private core'
+              for folder,surface in [('public_html','public'),('admin.naamiraa.ir','admin')]:
+                  assert ("NAMIRA_SURFACE', '"+surface+"'").encode() in r.read(folder+'/index.php'),'Unexpected document root entry'
+              jobs=[]
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash'],'Source manifest mismatch'
+                  targets=['public_html/robots.txt'] if item['path']=='public/robots.txt' else ([folder+'/'+item['path'][7:] for folder in ['public_html','admin.naamiraa.ir']] if item['path'].startswith('public/') else [prefix+'/'+item['path']])
+                  for target in targets:
+                      old=r.maybe(target)
+                      if old is not None:assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected existing revision: '+item['path']
+                      else:assert item['oldHash'] is None,'Expected existing source absent'
+                      jobs.append((target,raw,old,item['path']))
+              pending=prefix+'/.clean-urls-pending'
+              assert r.maybe(pending) is None,'Another routing activation is pending'
+              old_htaccess=r.read('public_html/.htaccess')
+              block=Path('namira-source/namira/public/.htaccess').read_bytes().split(b'# BEGIN NAMIRA CLEAN URLS',1)[1].split(b'# END NAMIRA CLEAN URLS',1)[0]
+              import re
+              clean_block=b'\n# BEGIN NAMIRA CLEAN URLS'+block+b'# END NAMIRA CLEAN URLS\n'
+              new_htaccess=re.sub(rb'\n?# BEGIN NAMIRA CLEAN URLS.*?# END NAMIRA CLEAN URLS\n?',b'\n',old_htaccess,flags=re.S)+clean_block
+              r.put(pending,source.encode(),True);owns_pending=True
+              before['public_html/.htaccess']=old_htaccess
+              r.put(backup+'/public-root.htaccess',old_htaccess,True)
+              # Stage all code while the public legacy URLs remain active.
+              priority={'views/home-showcase.php':1,'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6,'views/layout.php':7}
+              jobs.sort(key=lambda job:priority.get(job[3],0))
+              for target,raw,old,relative in jobs:
+                  before[target]=old
+                  if old==raw:continue
+                  if old is not None:r.put(backup+'/'+relative,old,True)
+                  r.put(target,raw,not relative.startswith('public/'));assert r.read(target)==raw,'Readback mismatch';changed.append(target)
+                  print('VERIFIED_FILE '+relative,flush=True)
+              r.put('public_html/.htaccess',new_htaccess);changed.append('public_html/.htaccess');assert r.read('public_html/.htaccess')==new_htaccess,'Rewrite readback failed'
+              r.remove_created(pending)
+              r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan,'schema_changed':False,'content_records_modified':False}).encode(),True)
+              status,body,headers=http('https://naamiraa.ir/')
+              assert status==200 and 'home-showcase' in body,'Public homepage failed'
+              assert re.findall(r'class="nm-bottom-label">([^<]+)</span>',body)==['خانه','شهدا','فروشگاه','تصاویر','حساب'],'Mobile navigation changed'
+              for path in ['/images','/martyrs','/artists','/calls','/shop','/login','/request-track','/about']:
+                  code,page,_=http('https://naamiraa.ir'+path);assert code==200,'Clean route failed: '+path
+              code,payload,_=http('https://naamiraa.ir/index.php?page=martyrs-data&mode=results');data=json.loads(payload);assert code==200 and data['ok'] and data['url'].startswith('/martyrs'),'Existing API failed'
+              code,sitemap,_=http('https://naamiraa.ir/sitemap.xml');assert code==200 and 'sitemapindex' in sitemap,'Clean sitemap failed'
+              code,admin,_=http('https://admin.naamiraa.ir/index.php?page=login');assert code==200 and 'ورود مدیر نامیرا' in admin,'Admin login changed'
+              from urllib.request import HTTPRedirectHandler,build_opener,HTTPSHandler
+              class NoRedirect(HTTPRedirectHandler):
+                  def redirect_request(self,*args,**kwargs):return None
+              direct=build_opener(HTTPSHandler(context=ssl.create_default_context()),NoRedirect())
+              try:direct.open('https://naamiraa.ir/index.php?page=gallery&q=test&p=2',timeout=60);raise AssertionError('Legacy redirect absent')
+              except HTTPError as error:assert error.code==301 and error.headers['Location'].startswith('/images?') and 'q=test' in error.headers['Location'] and 'p=2' in error.headers['Location'],'Legacy redirect did not preserve query'
+              try:http('https://admin.naamiraa.ir/index.php?page=home-preview');raise AssertionError('Anonymous preview exposed')
+              except HTTPError as error:assert error.code==403
+              result={'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'clean_routes':8,'legacy_301':True,'api_preserved':True,'admin_preserved':True,'schema_changed':False,'content_records_modified':False,'directory_count':data['count']}
+              Path('home-showcase-release.json').write_text(json.dumps(result,indent=2));print('CLEAN_URLS_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          except Exception:
+              if owns_pending:r.put(pending,source.encode(),True)
+              for target in reversed(changed):
+                  if before[target] is not None:
+                      try:r.put(target,before[target],not target.startswith(('public_html/','admin.naamiraa.ir/')))
+                      except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              if owns_pending and r.maybe(pending)==source.encode():r.remove_created(pending)
+              print('Existing changed files restored where connection remained available; private backup retained.',flush=True)
+              raise
+          finally:
+              try:f.quit()
+              except Exception:f.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-home-showcase-release
+          path: home-showcase-release.json
+          retention-days: 14
+
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify clean URLs on real Apache hosting
+        run: |
+          npm install --prefix "$RUNNER_TEMP/namira-live-browser" --no-package-lock --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/namira-live-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          LIVE_PLAYWRIGHT="$RUNNER_TEMP/namira-live-browser/node_modules/playwright" node <<'JS'
+          const {chromium}=require(process.env.LIVE_PLAYWRIGHT),assert=require('node:assert/strict');
+          (async()=>{const browser=await chromium.launch(),c=await browser.newContext({viewport:{width:1280,height:900}});try{
+            const base='https://naamiraa.ir',p=await c.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));let details=[];
+            for(const [path,selector] of [['/martyrs','.hs-martyr a'],['/artists','.artist-card a'],['/calls','.call-card a'],['/shop','.store-card a']]){assert.equal((await p.goto(base+path)).status(),200);const first=p.locator(selector).first();if(await first.count())details.push(await first.getAttribute('href'));}
+            for(const href of details){assert.equal((await p.goto(new URL(href,base).href)).status(),200);await p.reload();const canonical=await p.locator('link[rel=canonical]').getAttribute('href');assert.equal(new URL(canonical).pathname,new URL(p.url()).pathname);const u=new URL(p.url()),bits=u.pathname.split('/');bits[bits.length-1]='old-slug';const old=await c.request.get(base+bits.join('/'),{maxRedirects:0});assert.equal(old.status(),301);}
+            await p.goto(base+'/martyrs');assert.equal(await p.locator('header .search').getAttribute('action'),'/martyrs');assert.equal(await p.locator('header .search input[name=page]').count(),0);
+            for(const width of [390,1280]){await p.setViewportSize({width,height:900});await p.goto(base+'/images');await p.locator('[data-mobile-menu]').click();await p.locator('[data-mobile-drawer]').waitFor({state:'visible'});assert.equal(await p.locator('[data-mobile-page=gallery]:not([data-mobile-fragment])').getAttribute('aria-current'),'page');await p.keyboard.press('Escape');await p.waitForFunction(()=>!document.querySelector('[data-mobile-drawer]').open);assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
+            const html=await (await c.request.get(base+'/login')).text(),csrf=html.match(/name="csrf" value="([a-f0-9]{64})"/)[1];
+            for(const path of ['/request','/index.php?page=request']){const post=await c.request.post(base+path,{form:{action:'request',csrf},maxRedirects:0});assert.equal(post.status(),303);assert(new URL(post.headers().location,base).pathname==='/login');}
+            const api=await c.request.get(base+'/index.php?page=gallery-data&mode=preview');assert.equal(api.status(),200);assert((await api.json()).ok);assert.deepEqual(errors,[]);console.log('LIVE_CLEAN_URLS_BROWSER_VERIFIED '+JSON.stringify({details:details.length,refresh:true,oldSlugs301:true,post:'old/new preserved',api:true,mobile:true,desktop:true}));
+          }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
+          JS
