@@ -1,0 +1,110 @@
+name: Deploy Naamiraa TSMS module disabled
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-tsms.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOME_SOURCE: 'f464ba66fda9790d73bcfeb7b11c059e9482670e'
+      HOME_PLAN: '[{"path":"app/TsmsClient.php","oldHash":null,"newHash":"a7c0c1110ccd5ed0c1b24d22234ca973ad6c2a4eaeca1d117f4e0bb563ff67e7"},{"path":"app/SmsService.php","oldHash":null,"newHash":"87cbab4013f5208ffebe7f4c1691d159e02c4bcda3b8cb5c4bcb2c662ad3b43f"},{"path":"app/MobileAuth.php","oldHash":"37a51dcf4c73bbe8c19a879edcb912bb3d99467c69ff57fb6364438b5b2f250b","newHash":"9cf788c79da28cc9290a36f9fbf1e4351210228380a71a0f3a50542a3987dd42"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: f464ba66fda9790d73bcfeb7b11c059e9482670e
+          path: namira-source
+          persist-credentials: false
+      - name: Require passing tests for the exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,time
+          sha=os.environ['HOME_SOURCE']
+          for attempt in range(30):
+              request=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'Naamiraa-home-source-gate','Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira TSMS checks' and r['head_sha']==sha]
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Home showcase tests did not pass')
+              time.sleep(10)
+          else:raise RuntimeError('Passing exact-source home tests required')
+          PY
+      - name: Back up and apply tested directory files only
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,time
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['HOME_SOURCE'];plan=json.loads(os.environ['HOME_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          backup='_namira_live/backups/tsms-'+source[:12];before={};changed=[]
+          def digest(raw):return hashlib.sha256(raw).hexdigest()
+          def http(url):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache','User-Agent':'Namira-home-showcase-release'}),context=ssl.create_default_context(),timeout=60) as response:return response.status,response.read().decode(),dict(response.headers)
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active private core'
+              for folder,surface in [('public_html','public'),('admin.naamiraa.ir','admin')]:
+                  assert ("NAMIRA_SURFACE', '"+surface+"'").encode() in r.read(folder+'/index.php'),'Unexpected document root entry'
+              jobs=[]
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash'],'Source manifest mismatch'
+                  targets=[folder+'/'+item['path'][7:] for folder in ['public_html','admin.naamiraa.ir']] if item['path'].startswith('public/') else [prefix+'/'+item['path']]
+                  for target in targets:
+                      old=r.maybe(target)
+                      if old is not None:assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected existing revision: '+item['path']
+                      else:assert item['oldHash'] is None,'Expected existing source absent'
+                      jobs.append((target,raw,old,item['path']))
+              # New classes/templates/assets first; shared headers and home dispatch last.
+              priority={'views/home-showcase.php':1,'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6,'views/layout.php':7,'app/MobileAuth.php':8}
+              jobs.sort(key=lambda job:priority.get(job[3],0))
+              for target,raw,old,relative in jobs:
+                  before[target]=old
+                  if old==raw:continue
+                  if old is not None:r.put(backup+'/'+relative,old,True)
+                  r.put(target,raw,not relative.startswith('public/'));assert r.read(target)==raw,'Readback mismatch';changed.append(target)
+                  print('VERIFIED_FILE '+relative,flush=True)
+              r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan,'schema_changed':False,'content_records_modified':False}).encode(),True)
+              status,body,headers=http('https://naamiraa.ir/')
+              assert status==200 and 'home-showcase' in body,'Homepage regression'
+              code,login,_=http('https://naamiraa.ir/login?mode=otp');assert code==200 and 'mobile-request' in login and 'disabled' in login and 'ارسال کد واقعی فعلاً فعال نیست' in login,'OTP unexpectedly activated'
+              code,password,_=http('https://naamiraa.ir/login');assert code==200 and 'mobile-password' in password,'Password login regression'
+              code,signup,_=http('https://naamiraa.ir/login?mode=register');assert code==200 and 'mobile-request' in signup,'Registration entry regression'
+              code,admin,_=http('https://admin.naamiraa.ir/index.php?page=login');assert code==200 and 'ورود مدیر نامیرا' in admin,'Admin login regression'
+              code,payload,_=http('https://naamiraa.ir/index.php?page=gallery-data&mode=preview');assert code==200 and json.loads(payload)['ok'],'Gallery API regression'
+              result={'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'otp_page_http':200,'otp_enabled':False,'password_login_preserved':True,'admin_login_preserved':True,'schema_changed':False,'config_changed':False,'content_records_modified':False,'real_sms_sent':0}
+              Path('home-showcase-release.json').write_text(json.dumps(result,indent=2));print('TSMS_DISABLED_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  if before[target] is not None:
+                      try:r.put(target,before[target],not target.startswith(('public_html/','admin.naamiraa.ir/')))
+                      except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              print('Existing changed files restored where connection remained available; private backup retained.',flush=True)
+              raise
+          finally:
+              try:f.quit()
+              except Exception:f.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-home-showcase-release
+          path: home-showcase-release.json
+          retention-days: 14
+
