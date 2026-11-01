@@ -1,0 +1,144 @@
+name: Deploy Naamiraa shared header search
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-header-search.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOME_SOURCE: 'f134fa996879463e36186eb81e69586ff88944b5'
+      HOME_PLAN: '[{"path":"views/martyrs.php","oldHash":"1d273f19ca3a2deb690876bf766620046e5d0f980dc08233f851bd3c0cc08375","newHash":"51aaa2b922805aed7f6ce9673e77f031d857b03a86171fb84f5f14c58bbc4f8e"},{"path":"views/layout.php","oldHash":"778337b09eaa83f0e2761b41a3b0ffb3efc4f769af516a5ee7cf182604655bbc","newHash":"6e0ebc8b1739ae81facda8a42c89d5d54eee21f6dfc838438f20f091832b840f"},{"path":"app/Archive.php","oldHash":"e818ff641c437d859a2b459f0096e4a4ce0c7334a457f7d993a6cc3a1d9830ba","newHash":"25300f2364a06c2563e1874b4e7e24780c7f1fa484ad0cad84179c6410b7b306"},{"path":"app/GalleryFacets.php","oldHash":"297e044f0df334647a0d071855bacfa8ca72ad0d6ced8d32d41e210d575e8255","newHash":"92f41a07ac1448afb012de47ab1e3ed90cb12d671bfda34f2cbd0ca6f80df6c3"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: f134fa996879463e36186eb81e69586ff88944b5
+          path: namira-source
+          persist-credentials: false
+      - name: Require passing tests for the exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,time
+          sha=os.environ['HOME_SOURCE']
+          for attempt in range(30):
+              request=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'Naamiraa-home-source-gate','Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira home showcase checks' and r['head_sha']==sha]
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Home showcase tests did not pass')
+              time.sleep(10)
+          else:raise RuntimeError('Passing exact-source home tests required')
+          PY
+      - name: Back up and apply tested directory files only
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,time
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['HOME_SOURCE'];plan=json.loads(os.environ['HOME_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          backup='_namira_live/backups/header-search-'+source[:12];before={};changed=[]
+          def digest(raw):return hashlib.sha256(raw).hexdigest()
+          def http(url):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache','User-Agent':'Namira-home-showcase-release'}),context=ssl.create_default_context(),timeout=60) as response:return response.status,response.read().decode(),dict(response.headers)
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active private core'
+              for folder,surface in [('public_html','public'),('admin.naamiraa.ir','admin')]:
+                  assert ("NAMIRA_SURFACE', '"+surface+"'").encode() in r.read(folder+'/index.php'),'Unexpected document root entry'
+              jobs=[]
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash'],'Source manifest mismatch'
+                  targets=[folder+'/'+item['path'][7:] for folder in ['public_html','admin.naamiraa.ir']] if item['path'].startswith('public/') else [prefix+'/'+item['path']]
+                  for target in targets:
+                      old=r.maybe(target)
+                      if old is not None:assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected existing revision: '+item['path']
+                      else:assert item['oldHash'] is None,'Expected existing source absent'
+                      jobs.append((target,raw,old,item['path']))
+              # New classes/templates/assets first; shared headers and home dispatch last.
+              priority={'views/home-showcase.php':1,'views/admin-settings.php':2,'app/AdminPanel.php':3,'app/DomainRouting.php':4,'app/Security.php':5,'app/Web.php':6}
+              jobs.sort(key=lambda job:priority.get(job[3],0))
+              for target,raw,old,relative in jobs:
+                  before[target]=old
+                  if old==raw:continue
+                  if old is not None:r.put(backup+'/'+relative,old,True)
+                  r.put(target,raw,not relative.startswith('public/'));assert r.read(target)==raw,'Readback mismatch';changed.append(target)
+                  print('VERIFIED_FILE '+relative,flush=True)
+              r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan,'schema_changed':False,'content_records_modified':False}).encode(),True)
+              for attempt in range(10):
+                  status,body,headers=http('https://naamiraa.ir/index.php?page=home')
+                  if status==200 and 'home-showcase' in body and 'data-home-block=' in body:break
+                  time.sleep(5)
+              assert status==200 and 'home-showcase' in body and 'data-home-block=' in body,'Public showcase not confirmed'
+              import re
+              assert re.findall(r'class="nm-bottom-label">([^<]+)</span>',body)==['خانه','شهدا','فروشگاه','تصاویر','حساب'],'Mobile navigation changed'
+              code,gallery,_=http('https://naamiraa.ir/index.php?page=gallery');assert code==200 and 'gallery-filters' in gallery,'Gallery regression'
+              code,admin,_=http('https://admin.naamiraa.ir/index.php?page=login');assert code==200 and 'ورود مدیر نامیرا' in admin,'Admin login regression'
+              try:http('https://admin.naamiraa.ir/index.php?page=home-preview');raise AssertionError('Anonymous preview exposed')
+              except HTTPError as error:assert error.code==403,'Unexpected preview authorization status'
+              code,directory,_=http('https://naamiraa.ir/index.php?page=martyrs');assert code==200 and 'martyr-directory' in directory and 'martyr-directory-search' not in directory,'Directory unavailable'
+              code,payload,_=http('https://naamiraa.ir/index.php?page=martyrs-data&mode=results');data=json.loads(payload);assert code==200 and data['ok'] and 'page=martyrs' in data['url'],'Directory API failed'
+              assert 'page=martyrs' in body,'Homepage more link missing'
+              result={'directory_count':data['count'],'directory_http':code,'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'gallery_http':code,'schema_changed':False,'content_records_modified':False,'anonymous_preview':403,'default_blocks_visible':len(re.findall(r'data-home-block=',body))}
+              Path('home-showcase-release.json').write_text(json.dumps(result,indent=2));print('HEADER_SEARCH_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  if before[target] is not None:
+                      try:r.put(target,before[target],not target.startswith(('public_html/','admin.naamiraa.ir/')))
+                      except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              print('Existing changed files restored where connection remained available; private backup retained.',flush=True)
+              raise
+          finally:
+              try:f.quit()
+              except Exception:f.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-home-showcase-release
+          path: home-showcase-release.json
+          retention-days: 14
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify public directory on real hosting in mobile and desktop browsers
+        run: |
+          npm install --prefix "$RUNNER_TEMP/namira-live-browser" --no-package-lock --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/namira-live-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          LIVE_PLAYWRIGHT="$RUNNER_TEMP/namira-live-browser/node_modules/playwright" node <<'JS'
+          const {chromium}=require(process.env.LIVE_PLAYWRIGHT),assert=require('node:assert/strict'),fs=require('node:fs');
+          (async()=>{const browser=await chromium.launch();fs.mkdirSync('directory-live-evidence',{recursive:true});try{
+            const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+            const r=await page.goto('https://naamiraa.ir/index.php?page=martyrs');assert.equal(r.status(),200);await page.locator('.martyr-directory').waitFor();assert.equal(await page.locator('.martyr-directory-search').count(),0);
+            assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual(await page.locator('.nm-bottom-label').allTextContents(),['خانه','شهدا','فروشگاه','تصاویر','حساب']);
+            await page.locator('[data-mobile-menu]').click();await page.locator('[data-mobile-page=martyrs]').waitFor({state:'visible'});assert.equal(await page.locator('[data-mobile-page=martyrs]').getAttribute('aria-current'),'page');await page.locator('[data-mobile-close]').click();
+            const chip=page.locator('[data-filter-chip]').first();if(await chip.count()){await chip.click();await page.locator('[data-sheet-apply]').filter({hasText:'شهید'}).waitFor();assert(await page.locator('[data-gallery-dialog]').evaluate(e=>e.open));await page.locator('[data-sheet-close]').click();}
+            await page.screenshot({path:'directory-live-evidence/mobile390.png',fullPage:true});
+            await page.setViewportSize({width:320,height:740});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:'directory-live-evidence/mobile320.png',fullPage:true});
+            await page.setViewportSize({width:1280,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.equal(await page.locator('.hs-martyr-grid').evaluate(e=>getComputedStyle(e).gridTemplateColumns.split(' ').length),5);await page.screenshot({path:'directory-live-evidence/desktop1280.png',fullPage:true});
+            await page.goto('https://naamiraa.ir/');assert(await page.locator('.hs-more[href*="page=martyrs"]').count());await page.goto('https://naamiraa.ir/index.php?page=gallery');assert((await page.locator('.nm-bottom-nav a[aria-current=page]').getAttribute('href')).includes('page=gallery'));await page.goto('https://naamiraa.ir/index.php?page=shop');assert((await page.locator('.nm-bottom-nav a[aria-current=page]').getAttribute('href')).includes('page=shop'));assert.equal(await page.locator('header .search input[name=page]').inputValue(),'martyrs');await page.locator('header .search input[name=q]').fill('آزمونجستجویبدوننتیجه');await page.locator('header .search button').click();await page.waitForURL(u=>u.searchParams.get('page')==='martyrs'&&u.searchParams.get('q')==='آزمونجستجویبدوننتیجه');await page.goto('https://naamiraa.ir/index.php?page=gallery');assert.equal(await page.locator('header .search input[name=page]').inputValue(),'gallery');await page.locator('header .search input[name=q]').fill('آزمونجستجویبدوننتیجه');await page.locator('header .search button').click();await page.waitForURL(u=>u.searchParams.get('page')==='gallery'&&u.searchParams.get('q')==='آزمونجستجویبدوننتیجه');assert.deepEqual(errors,[]);console.log('LIVE_HEADER_SEARCH_BROWSER_VERIFIED mobile390 mobile320 desktop1280 menu sheet home-link no-JS-errors');
+          }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-header-search-live-browser
+          path: directory-live-evidence
+          retention-days: 14
