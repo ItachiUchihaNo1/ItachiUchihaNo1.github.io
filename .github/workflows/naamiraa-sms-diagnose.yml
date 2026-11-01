@@ -1,0 +1,69 @@
+name: Diagnose Naamiraa SMS without sending
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-sms-diagnose.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HOME_SOURCE: '8ac2c2490cd418e982cd54aa0272b6200230927d'
+      HOME_PLAN: '[{"path":"app/Env.php","oldHash":"1c4e6b9e789b54a19d7365cd3d4560008126e5c2d8c77b40dafaa5af6ec814ae","newHash":"e51d3a92b16f9c0055333be491b9a62aadfb267253e25cd266fdbddf0700e0de"},{"path":"app/TsmsClient.php","oldHash":"a7c0c1110ccd5ed0c1b24d22234ca973ad6c2a4eaeca1d117f4e0bb563ff67e7","newHash":"f412f2f7b31006bdde52165d8d9b9634005fdfd9853e866f0907a52ac1401a7b"},{"path":"app/SmsService.php","oldHash":"87cbab4013f5208ffebe7f4c1691d159e02c4bcda3b8cb5c4bcb2c662ad3b43f","newHash":"f7c67fb7791df2fd9f845cc11e3334f2c17d02d75471c449d0cb179a2610fdf3"},{"path":"app/MobileAuth.php","oldHash":"9cf788c79da28cc9290a36f9fbf1e4351210228380a71a0f3a50542a3987dd42","newHash":"11a9f2d7462da86a48d4baafbc0db0af7bda415b8805d83832a7382769460cef"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 8ac2c2490cd418e982cd54aa0272b6200230927d
+          path: namira-source
+          persist-credentials: false
+      - name: Read sanitized configuration and recent SMS error types - no send
+        run: |
+          python3 - <<'PY'
+          import os,sys,json,ssl,re,socket
+          from urllib.request import Request,urlopen,build_opener,HTTPRedirectHandler,HTTPSHandler
+          from urllib.error import HTTPError,URLError
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=45);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          try:
+              raw=r.read('_namira_live/config.local.json');cfg=json.loads(raw);sms=cfg.get('sms',{})
+              result={'nested_sms':isinstance(sms,dict) and bool(sms),'enabled':sms.get('enabled') in [True,'1'],'username_present':bool(str(sms.get('username','')).strip()),'password_present':bool(str(sms.get('password','')).strip()),'sender_numeric':bool(re.fullmatch(r'\+?[0-9]{3,20}',str(sms.get('sender','')))),'private_key_present':bool(r.maybe('_namira_live/.otp-secret'))}
+              key=r.maybe('_namira_live/.otp-secret');result['private_key_length_valid']=key is not None and len(key.strip())>=32
+              events=[]
+              for path in ['public_html/error_log','admin.naamiraa.ir/error_log','_namira_live/storage/error.log']:
+                  try:
+                      size=f.size(r.path(path))
+                      if not size:continue
+                      chunks=[];f.retrbinary('RETR '+r.path(path),chunks.append,rest=max(0,size-131072));tail=b''.join(chunks).decode('utf-8','replace')
+                      for line in tail.splitlines():
+                          m=re.search(r'Namira SMS: (?:event=([a-f0-9]{16}) kind=(provider-[0-9]+|unconfirmed)|send not confirmed; event=([a-f0-9]{16}))',line)
+                          if m:events.append({'kind':m.group(2) or 'unconfirmed','source':'public' if path.startswith('public_html') else 'other'})
+                  except Exception:pass
+              result['recent_sms_events']=events[-8:]
+              print('SMS_READ_ONLY_AUDIT '+json.dumps(result),flush=True)
+          finally:
+              try:f.quit()
+              except Exception:f.close()
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs):return None
+          opener=build_opener(HTTPSHandler(context=ssl.create_default_context()),NoRedirect())
+          for url in ['https://tsms.ir/url/tsmshttp.php','https://www.tsms.ir/url/tsmshttp.php']:
+              try:
+                  response=opener.open(Request(url,method='HEAD'),timeout=15);result={'status':response.status}
+              except HTTPError as error:result={'status':error.code,'redirect':(error.headers.get('Location','').split('?')[0] if error.code in [301,302,303,307,308] else '')}
+              except Exception as error:result={'error_type':type(error).__name__,'reason_type':type(getattr(error,'reason',None)).__name__}
+              print('TSMS_NO_CREDENTIAL_HEAD '+json.dumps({'host':'www' if '//www.' in url else 'base',**result}),flush=True)
+          print('NO_SMS_SENT')
+          
+          PY
