@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      HOME_SOURCE: 'b21d06a27cf09f8a438a2f468ac949138869464c'
+      HOME_SOURCE: '0196fee27c4419eb147a05a64836ce11b6b2d240'
       HOME_PLAN: '[{"path":"app/GalleryFacets.php","newHash":"297e044f0df334647a0d071855bacfa8ca72ad0d6ced8d32d41e210d575e8255","oldHash":"fb9fb1be544e5b9241eff7e987d6c1ae84143ef06e2a72b22c38cbeafb240e16"},{"path":"app/MartyrDirectory.php","newHash":"1fbe892bf49f1aac678e115eeb7c7d8d8420155dd704fa79b75f693dfbcc76bd","oldHash":null},{"path":"app/HomeShowcase.php","newHash":"7e263dac3208f49bbcd2085be3c46d10035775d88de5abfa938262c9fc960daf","oldHash":"a04f8c14314e06dc7e8753729c06aea8910c5c2485f1f6898948a93ee4f54fef"},{"path":"views/martyr-card.php","newHash":"f479135591c3d09be6cef4b3131d491c0b053d55b837cf70a4e4d01fab490a0a","oldHash":null},{"path":"views/home-showcase.php","newHash":"46e8319a5728e384f90999ce8538e0ace7f6b76dd18cfb77485831ba755ab5c9","oldHash":"c29914ebdb8f6afe0c92419badf5915b3a689d1a7666f284d948254e22b284b6"},{"path":"views/martyr-results.php","newHash":"26018d08237293b1e2c98d677eef0bb5b5c4692382cee1cb68482db71719d584","oldHash":null},{"path":"views/martyrs.php","newHash":"1d273f19ca3a2deb690876bf766620046e5d0f980dc08233f851bd3c0cc08375","oldHash":null},{"path":"views/gallery-filter-bar.php","newHash":"af09a0679f4edd42c236d367c92fd2cf78c82971628d15d248950ba61065df40","oldHash":"e2d2081f55fc8fc249118ddddaf62e8034e57e025751495f5c4bea178507148c"},{"path":"views/martyr-filter-tags.php","newHash":"035ff28fe0e6110f0184be55499dbf1ddf9ced690b34ab9a578fafe28d2a8135","oldHash":"e63abdadff8bd0a474201dadbdcb5b1ec6605a8b19ab7bbd74ed1063d18972b3"},{"path":"public/assets/gallery-filters.js","newHash":"496c281b37198f8c76063c7b0f18e4e055de0b320966a4376fc0ec8bbaaa21a1","oldHash":"770ff5770b070d4e953cfa61fabc7cb1e05843c0b6edc3b3abc55a42ee2d2b95"},{"path":"app/Web.php","newHash":"77c789f8ab9dd07e5f840af2d9192097ebc283291de4f416288f37373a3c46a8","oldHash":"2bf1e223e7960e6289cd5354b1585cb4d38adf49635ae8cdfb598dc3e23b2e6f"},{"path":"app/MobileNavigation.php","newHash":"e0ccb769c6b178edb389250452bfe6b29b7a4fe129e703ee731960c04b9f40ad","oldHash":"7d7e59b1bfb3829036595c6d478375b6f86caab46b42782bb12496006ea37154"},{"path":"public/assets/home-showcase.css","newHash":"fda83bbfe2920975afd9d38d80a009404d540427dbad537da53a42c53288db84","oldHash":"d17c0a1a040f0a027fad6054a8f2bd95e33fd73d1ce9ba9f94241283314f5509"},{"path":"app/Media.php","newHash":"e125b5e1f464029c4cf2644c315b24042b6e7cdfc69426b600fd54d414162057","oldHash":"cde857a3a03a0cb8c4b7042ecc314849e54f71bd7395cbc36c597f884b4ffc86"},{"path":"views/admin-media.php","newHash":"483483dffa9cd481c79c55800bd54f5db890e1ebc143a6e8833f320020d9a2dd","oldHash":"a6335f56a958e77ce12675a04be6a919c77f50798e65deac43613b1a6fefa348"},{"path":"app/AdminPublishing.php","newHash":"bd687721b609c1e0f7d496d30b62fe24484ee035998b4ff7c254c021cc16d807","oldHash":"12b3a2c9f9512d53e045e70416439edfa463691e759a0ba21a25e65511e8f2ac"},{"path":"app/StoreSeo.php","newHash":"b369bb27ad102100b094ea0de3789e05099622a533e3c410ebd7f156db454c8f","oldHash":"ec1776c27470453c37af827354be373496961640abc2aa72bd3daad5f775c182"}]'
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: b21d06a27cf09f8a438a2f468ac949138869464c
+          ref: 0196fee27c4419eb147a05a64836ce11b6b2d240
           path: namira-source
           persist-credentials: false
       - name: Require passing tests for the exact source
@@ -93,9 +93,9 @@ jobs:
               try:http('https://admin.naamiraa.ir/index.php?page=home-preview');raise AssertionError('Anonymous preview exposed')
               except HTTPError as error:assert error.code==403,'Unexpected preview authorization status'
               code,directory,_=http('https://naamiraa.ir/index.php?page=martyrs');assert code==200 and 'martyr-directory-search' in directory,'Directory unavailable'
-          code,payload,_=http('https://naamiraa.ir/index.php?page=martyrs-data&mode=results');data=json.loads(payload);assert code==200 and data['ok'] and 'page=martyrs' in data['url'],'Directory API failed'
-          assert 'page=martyrs' in body,'Homepage more link missing'
-          result={'directory_count':data['count'],'directory_http':code,'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'gallery_http':code,'schema_changed':False,'content_records_modified':False,'anonymous_preview':403,'default_blocks_visible':len(re.findall(r'data-home-block=',body))}
+              code,payload,_=http('https://naamiraa.ir/index.php?page=martyrs-data&mode=results');data=json.loads(payload);assert code==200 and data['ok'] and 'page=martyrs' in data['url'],'Directory API failed'
+              assert 'page=martyrs' in body,'Homepage more link missing'
+              result={'directory_count':data['count'],'directory_http':code,'source':source,'backup':backup,'files_changed':len(changed),'home_http':status,'gallery_http':code,'schema_changed':False,'content_records_modified':False,'anonymous_preview':403,'default_blocks_visible':len(re.findall(r'data-home-block=',body))}
               Path('home-showcase-release.json').write_text(json.dumps(result,indent=2));print('MARTYR_DIRECTORY_RELEASE_VERIFIED '+json.dumps(result),flush=True)
           except Exception:
               for target in reversed(changed):
