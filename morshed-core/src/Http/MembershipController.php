@@ -51,7 +51,7 @@ final class MembershipController
    case '/community/organization/review':case '/membership/organization/review':$this->service->reviewOrganization($a,$d);$back=$this->realm==='admin'?'/membership/reviews':'/community/manage';break;
    case '/membership/policy/save':$this->service->savePolicy($a,$d);$back='/membership/policy';break;
    case '/membership/level':$this->service->experienceLevel($a,Policy::text($d['user_id']??'',32),Policy::integer($d['novice']??1,0,1)===1);$back='/membership/policy';break;
-   case '/membership/credits/grant':$id=(new ConsultationCredits($this->db))->grant($a,$d);$back='/membership/credits';break;
+   case '/membership/credits/grant':$id=(new ConsultationCredits($this->db))->grant($a,$d);$back=($d['return_user']??'')==='1'?'/users/edit?id='.rawurlencode(Policy::text($d['user_id']??'',32)).'#consultation-credits':'/membership/credits';break;
    case '/membership/replies/save':$this->service->write(function()use($a,$d){$code=Policy::text($d['code']??'',24);if(!$this->db->one('SELECT code FROM m_consultation_replies WHERE code=?',[$code]))throw new Problem('NOT_FOUND','قالب پیدا نشد.',404);$this->db->run('UPDATE m_consultation_replies SET title=?,body=?,active=? WHERE code=?',[Policy::text($d['title']??'',180),Policy::text($d['body']??'',4000),Policy::integer($d['active']??0,0,1),$code]);(new Audit($this->db))->add($a['user_id'],'admin','consultation.reply_template',$code);});$back='/membership/policy';break;
    case '/membership/network/save':$id=$this->service->network($a,$d);$back='/membership/networks';break;
    case '/membership/network/link':$this->service->linkNetwork($a,Policy::text($d['network_id']??'',32),Policy::text($d['org_id']??'',32),($d['remove']??'')==='1');$back='/membership/networks';break;

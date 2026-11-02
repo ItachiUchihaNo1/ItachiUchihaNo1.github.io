@@ -429,6 +429,7 @@ echo "PASS all database rows restored and old authentication invalidated\nPASS c
     subprocess.run([sys.executable,str(app/'tests/chat33_http.py'),str(scratch),str(php)],check=True)
     php_run('slots31.php')
     subprocess.run([sys.executable,str(app/'tests/slots31_http.py'),str(scratch)],check=True)
+    subprocess.run([sys.executable,str(app/'tests/credits34_http.py'),str(scratch)],check=True)
     for log_name in ['site.log','admin.log']:
         assert 'Undefined variable $path' not in (scratch/log_name).read_text(encoding='utf-8',errors='replace'),'POST initialization emitted an unexpected warning'
     (scratch/'http-results.json').write_text(json.dumps({'database_engine':version,'checks':checks},indent=2),encoding='utf-8')

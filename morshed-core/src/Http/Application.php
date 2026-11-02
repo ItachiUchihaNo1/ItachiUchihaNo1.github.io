@@ -265,7 +265,7 @@ final class Application
             case '/users/edit':
                 $id=$this->queryString('id',32);$u=$this->db->one('SELECT id,display_name,phone,phone_verified_at,status,created_at FROM m_users WHERE id=?',[$id]);
                 if(!$u){throw new Problem('NOT_FOUND','کاربر پیدا نشد.',404);}
-                $this->view->page('ویرایش اطلاعات کاربر','admin-user-edit',['user'=>$u,'profile'=>Profile::get($this->db,$id),'username'=>$this->accounts->username($id)??'','atlasApproved'=>(new \Morshed\Product\Contributions($this->db))->atlasVisible('mentor',$id),'mentor'=>$this->db->one('SELECT status,accepted_at FROM m_mentors WHERE user_id=?',[$id])],$error);return;
+                $this->view->page('ویرایش اطلاعات کاربر','admin-user-edit',['user'=>$u,'profile'=>Profile::get($this->db,$id),'username'=>$this->accounts->username($id)??'','atlasApproved'=>(new \Morshed\Product\Contributions($this->db))->atlasVisible('mentor',$id),'mentor'=>$this->db->one('SELECT status,accepted_at FROM m_mentors WHERE user_id=?',[$id]),'creditBalance'=>(new \Morshed\Product\ConsultationCredits($this->db))->balance($id),'creditGrants'=>$this->db->all('SELECT g.amount,g.reason,g.expires_at,u.display_name AS admin_name FROM m_credit_grants g JOIN m_users u ON u.id=g.granted_by WHERE g.user_id=? ORDER BY g.created_at DESC,g.id DESC LIMIT 10',[$id])],$error);return;
             case '/users':
                 $q=is_string($_GET['q']??null)?trim(substr($_GET['q'],0,160)):'';$page=max(1,min(10000,(int)($_GET['page']??1)));$offset=($page-1)*20;
                 $like='%'.strtr($q,['\\'=>'\\\\','%'=>'\\%','_'=>'\\_']).'%';

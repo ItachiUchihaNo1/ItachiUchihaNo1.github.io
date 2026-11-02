@@ -1,0 +1,11 @@
+<section class="card" id="consultation-credits" aria-labelledby="user-credits-title"><h2 id="user-credits-title">فرصت‌های مشاوره</h2>
+<div class="row"><span class="tag">قابل استفاده: <?= $this->number($creditBalance['available']) ?></span><span class="tag">فرصت اضافهٔ باقی‌مانده: <?= $this->number($creditBalance['bonus']) ?></span><span class="tag">رزروشده: <?= $this->number($creditBalance['held']) ?></span></div>
+<p class="small muted">با ثبت ۱ فرصت اضافه، کاربر یک مشاورهٔ دیگر علاوه بر سهمیهٔ فعلی خواهد داشت. سهمیهٔ عمومی کاربران تغییر نمی‌کند. فرصت اضافه تا تاریخ تعیین‌شده معتبر است.</p>
+<?php if($user['status']==='active'&&empty($profile['deleted_at'])): ?>
+<?= $this->start('/membership/credits/grant') ?><input type="hidden" name="id" value="<?= $this->h(\Morshed\Core\Security::id()) ?>"><input type="hidden" name="user_id" value="<?= $this->h($user['id']) ?>"><input type="hidden" name="return_user" value="1">
+<label for="extra-credit-amount">تعداد فرصت اضافه</label><input id="extra-credit-amount" name="amount" type="number" min="1" max="1000" step="1" value="1" required>
+<?= $this->field('expires_local','اعتبار تا (به وقت تهران)','datetime-local',(new DateTimeImmutable('now',new DateTimeZone('Asia/Tehran')))->modify('+30 days')->format('Y-m-d\TH:i')) ?>
+<?= $this->field('reason','دلیل افزایش فرصت','text','افزایش فرصت مشاوره توسط مدیر',true,1000) ?>
+<button class="primary">افزودن فرصت مشاوره</button></form><p class="small muted">پس از ثبت، فرصت در حساب کاربر اعمال و اعلان داخل سامانه برای او ثبت می‌شود.</p>
+<?php else: ?><p class="notice">برای افزایش فرصت، ابتدا حساب را فعال یا بازیابی کنید.</p><?php endif; ?>
+<?php if($creditGrants): ?><details class="section"><summary>سوابق فرصت‌های اضافه</summary><?php foreach($creditGrants as $grant): ?><article class="section"><strong><?= $this->number($grant['amount']) ?> فرصت اضافه</strong><p class="small"><?= $this->h($grant['reason']) ?></p><p class="small muted">ثبت‌کننده: <?= $this->h($grant['admin_name']) ?> · <?= (int)$grant['expires_at']<=time()?'منقضی‌شده':'اعتبار تا '. $this->h(\Morshed\Product\Consultations::sessionLabel((int)$grant['expires_at'])) ?></p></article><?php endforeach; ?></details><?php endif; ?></section>
