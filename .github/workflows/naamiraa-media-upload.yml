@@ -1,0 +1,130 @@
+name: Deploy Naamiraa media upload
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-media-upload.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      UPLOAD_SOURCE: 'b9bbc39bf0e1acd6612745152bec4db98818658f'
+      UPLOAD_PLAN: '[{"path":"app/AdminPublishing.php","oldHash":"bd687721b609c1e0f7d496d30b62fe24484ee035998b4ff7c254c021cc16d807","newHash":"5ebcd993cef80ea20ee841a6450c0ab6f59022ffacb2f86e72ef3394691bf1d3"},{"path":"app/Web.php","oldHash":"cd8db416c5e2b9a76a318351b597f774aa6bcf8c1c75518b0bc9598a3ec2fcdb","newHash":"9b5ff62cf5b9dc18289d1275773b608d0acf8615d6b4a076e04efbf0732b621d"},{"path":"views/media-upload.php","oldHash":"1b2e24cb1a526657354bf9b86b4ad05d38d975e2a106ee7ad123dee73608bdcb","newHash":"d7e9dd265efd1df11e18ac8194245ab05ec87410e2d48d6f1d79d1457a83eca7"},{"path":"public/assets/admin.js","oldHash":"0ba17a0ab69643c08621ba50edc8e895f187e36b38ff7a1cebf676f61db2acb1","newHash":"a70745a125aa3bb2efdca4bf2fa77371a58c9ae4beba6a2629dab4c998f42057"},{"path":"views/admin-shell.php","oldHash":"f12a549b5119caeb61bc804efd0fa90937c62adbf2bbcf47c4bfddee7be0a538","newHash":"283e52a12359ab69bb12c5daf4fe5ec6063332ab7edc090be1875a31a2eecc32"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: b9bbc39bf0e1acd6612745152bec4db98818658f
+          path: namira-source
+          persist-credentials: false
+      - name: Require exact source tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,time
+          sha=os.environ['UPLOAD_SOURCE']
+          for attempt in range(36):
+              request=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'Namira-media-upload-release','Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira media upload checks' and r['head_sha']==sha]
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Exact-source upload checks failed')
+              time.sleep(10)
+          else:raise RuntimeError('Passing exact-source upload checks required')
+          PY
+      - name: Back up apply and verify upload changes
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,secrets
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['UPLOAD_SOURCE'];plan=json.loads(os.environ['UPLOAD_PLAN'])
+          release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          backup='_namira_live/backups/media-upload-'+source[:12];before={};changed=[];probe_path=None
+          def digest(raw):return hashlib.sha256(raw).hexdigest()
+          def http(url,headers=None):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache',**(headers or {})}),context=ssl.create_default_context(),timeout=60) as response:return response.status,response.read(),dict(response.headers)
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected private release'
+              for folder,surface in [('public_html','public'),('admin.naamiraa.ir','admin')]:
+                  assert ("NAMIRA_SURFACE', '"+surface+"'").encode() in r.read(folder+'/index.php'),'Unexpected entry point'
+              config=r.read('_namira_live/config.local.json')
+              jobs=[]
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash'],'Source mismatch'
+                  targets=[folder+'/'+item['path'][7:] for folder in ['public_html','admin.naamiraa.ir']] if item['path'].startswith('public/') else [prefix+'/'+item['path']]
+                  for target in targets:
+                      old=r.read(target);assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected existing revision: '+item['path']
+                      jobs.append((target,raw,old,item['path']))
+                      r.put(backup+'/'+target,old,True)
+              # Guarded, short-lived, read-only rendering probe. It never runs migrations or saves content.
+              token=secrets.token_hex(32);name='_namira-upload-check-'+secrets.token_hex(16)+'.php';probe_path='admin.naamiraa.ir/'+name
+              php="""<?php
+          declare(strict_types=1);
+          ini_set('display_errors','0');
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_UPLOAD_CHECK']??''))){http_response_code(404);exit;}
+          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');
+          require NAMIRA_SHARED_PATH.'/current.php';
+          header('Content-Type: application/json');header('Cache-Control: no-store');
+          $db=Namira\\Db::connect();$_SESSION=[];
+          $counts=[];foreach(['images','martyrs','artists','media_martyrs','media_artists','media_public_martyrs','media_public_artists'] as $table)$counts[$table]=(int)Namira\\Db::query($db,'SELECT COUNT(*) FROM '.$table)->fetchColumn();
+          set_error_handler(function($severity,$message,$file,$line){throw new ErrorException($message,0,$severity,$file,$line);});
+          ob_start();view('media-upload',['db'=>$db]);$html=ob_get_clean();restore_error_handler();
+          echo json_encode(['counts'=>$counts,'normal'=>str_contains($html,'value="normal"'),'bulk'=>str_contains($html,'value="bulk"'),'single_person'=>str_contains($html,'name="upload_martyr_id"'),'optional_artist'=>str_contains($html,'name="upload_artist_id"'),'progress'=>str_contains($html,'data-upload-status')]);
+          """
+              php=php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest())
+              r.put(probe_path,php.encode(),False)
+              def inspect():
+                  status,body,_=http('https://admin.naamiraa.ir/'+name,{'X-Namira-Upload-Check':token});assert status==200
+                  return json.loads(body)
+              baseline=inspect()
+              # Server support first, then JS, template, cache-busted shell.
+              priority={'app/AdminPublishing.php':0,'app/Web.php':1,'public/assets/admin.js':2,'views/media-upload.php':3,'views/admin-shell.php':4}
+              jobs.sort(key=lambda job:priority[job[3]])
+              for target,raw,old,relative in jobs:
+                  before[target]=old
+                  if old==raw:continue
+                  r.put(target,raw,not relative.startswith('public/'));changed.append(target)
+                  assert r.read(target)==raw,'Readback mismatch'
+                  print('VERIFIED_FILE '+relative,flush=True)
+              current=inspect();assert all(current[k] for k in ['normal','bulk','single_person','optional_artist','progress']),'Hosted form failed rendering'
+              assert all(current['counts'][k]>=baseline['counts'][k] for k in baseline['counts']),'Unexpected reduced content counts'
+              assert r.read('_namira_live/config.local.json')==config,'Configuration changed'
+              for url in ['https://naamiraa.ir/','https://naamiraa.ir/images','https://naamiraa.ir/martyrs','https://naamiraa.ir/artists','https://admin.naamiraa.ir/index.php?page=login']:
+                  status,body,_=http(url);assert status==200 and b'Fatal error' not in body,'Public/admin route regression'
+              status,js,_=http('https://admin.naamiraa.ir/assets/admin.js?v=20261104-upload');assert b'data-media-upload' in js,'Stale hosted asset'
+              r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan,'counts_before':baseline['counts'],'counts_after':current['counts'],'schema_changed':False,'content_records_modified':False}).encode(),True)
+              result={'source':source,'backup':backup,'files_changed':len(changed),'hosted_form':current,'public_routes':4,'admin_login':200,'schema_changed':False,'config_changed':False,'content_records_modified':False,'live_upload_write_test':False}
+              Path('media-upload-release.json').write_text(json.dumps(result,indent=2));print('MEDIA_UPLOAD_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  try:r.put(target,before[target],not target.startswith(('public_html/','admin.naamiraa.ir/')))
+                  except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              raise
+          finally:
+              if probe_path:
+                  r.remove_created(probe_path);print('TEMPORARY_PROBE_REMOVED',flush=True)
+              try:f.quit()
+              except Exception:f.close()
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-media-upload-release
+          path: media-upload-release.json
+          retention-days: 14
