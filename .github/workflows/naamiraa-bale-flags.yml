@@ -1,0 +1,48 @@
+name: Inspect Naamiraa payment configuration flags
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-bale-flags.yml']
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 89fd584b561a3caf03e91c1d351aa497ec673244
+          path: namira-source
+          persist-credentials: false
+      - name: Read only known configuration presence flags
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,ssl,secrets,hashlib,json
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f);key=secrets.token_hex(32);name='_namira-bale-flags-'+secrets.token_hex(16)+'.php';target='admin.naamiraa.ir/'+name
+          php="""<?php
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_FLAGS']??''))){http_response_code(404);exit;}
+          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';header('Content-Type: application/json');header('Cache-Control: no-store');
+          $c=json_decode(file_get_contents(Namira\\Env::privateRoot().'/config.local.json'),true);$p=is_array($c['payment']??null)?$c['payment']:[];
+          $filled=static fn($a,$k)=>is_string($a[$k]??null)&&trim($a[$k])!=='';
+          echo json_encode(['payment_section'=>is_array($c['payment']??null),'enabled_boolean'=>($p['enabled']??null)===true,'driver_bale'=>($p['driver']??null)==='bale','nested_bot_present'=>$filled($p,'bot_token'),'nested_provider_present'=>$filled($p,'provider_token'),'flat_bot_present'=>$filled($c,'BALE_BOT_TOKEN'),'flat_provider_present'=>$filled($c,'BALE_PROVIDER_TOKEN'),'effective_driver_bale'=>Namira\\Env::get('PAYMENT_DRIVER')==='bale','effective_bot_present'=>Namira\\Env::get('BALE_BOT_TOKEN')!=='','effective_provider_present'=>Namira\\Env::get('BALE_PROVIDER_TOKEN')!=='','bot_format_valid'=>(bool)preg_match('/^[0-9]+:[A-Za-z0-9_-]+$/D',Namira\\Env::get('BALE_BOT_TOKEN')),'test_provider'=>str_starts_with(Namira\\Env::get('BALE_PROVIDER_TOKEN'),'WALLET-TEST-')]);
+          """
+          try:
+              r.put(target,php.replace('__HASH__',hashlib.sha256(key.encode()).hexdigest()).encode(),False)
+              with urlopen(Request('https://admin.naamiraa.ir/'+name,headers={'X-Namira-Flags':key}),context=ssl.create_default_context(),timeout=60) as response:proof=json.loads(response.read())
+              print('BALE_CONFIG_FLAGS '+json.dumps(proof),flush=True)
+          finally:
+              r.remove_created(target);f.quit()
+          
+          PY
