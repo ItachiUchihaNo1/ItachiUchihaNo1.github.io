@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      AUTH_SOURCE: '103dfe1f4f3dcb19c217066ecd234adda7505492'
-      AUTH_PLAN: '[{"path":"app/MobileAuth.php","oldHash":"11a9f2d7462da86a48d4baafbc0db0af7bda415b8805d83832a7382769460cef","newHash":"262a55dfaeea161835ace0a62def4103f57345f37889034a5764a9c01578c4d8"},{"path":"app/AccountUi.php","oldHash":"a2582abfca4afa9e485800d7b9161b75a275199d3971d2c5fe1b4ad4c2314965","newHash":"a40f9fd20d6bb3e0604c0b4f4adcb64f11a1839fb22a36b84048ce0426d054c5"},{"path":"app/Web.php","oldHash":"1ae27637b0c1ab0b57b502f78f634fc28916f78c138944f55c9417d7a8293194","newHash":"075c28255518e30531e82cc52d9e0af9fe8ba8ccee5fdafd688a55b92d8b5301"},{"path":"views/mobile-login.php","oldHash":"d2fd4e39a863189daa4b623a078e5031cc041c3617e4a882e82fb57c24dbff78","newHash":"8270336bb3290ab0b9485829854bb1861a6b73fa87f8ebfb4891fbf18ae5862f"}]'
+      AUTH_SOURCE: '89fd584b561a3caf03e91c1d351aa497ec673244'
+      AUTH_PLAN: '[{"path":"app/AccountUi.php","oldHash":"a40f9fd20d6bb3e0604c0b4f4adcb64f11a1839fb22a36b84048ce0426d054c5","newHash":"5d13f06ddeb7fe5eabf8dd41ddccaa8e40e942bd5a69425fdbaac0be1c92d607"},{"path":"views/mobile-login.php","oldHash":"8270336bb3290ab0b9485829854bb1861a6b73fa87f8ebfb4891fbf18ae5862f","newHash":"65ffdad457f2a127c30cdb4d46cc16f9d271d03f172a3071d2cb24fddd534824"}]'
       DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
       DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
       DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ItachiUchihaNo1/heiat-network
-          ref: 103dfe1f4f3dcb19c217066ecd234adda7505492
+          ref: 89fd584b561a3caf03e91c1d351aa497ec673244
           path: namira-source
           persist-credentials: false
       - name: Require exact-source auth checks
@@ -48,51 +48,55 @@ jobs:
           python3 -u - <<'PY'
           import os,sys,json,ssl,hashlib,secrets,re
           from pathlib import Path
-          from urllib.request import Request,urlopen,build_opener,HTTPSHandler,HTTPCookieProcessor
-          from urllib.parse import urlencode
-          from urllib.error import HTTPError
-          from http.cookiejar import CookieJar
+          from urllib.request import Request,urlopen
           sys.path.insert(0,'namira-source/namira/deploy')
           import domains as d
           source=os.environ['AUTH_SOURCE'];plan=json.loads(os.environ['AUTH_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
-          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f);backup='_namira_live/backups/member-completion-'+source[:12];before={};changed=[];probe_path=None
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f);backup='_namira_live/backups/sales-min-password-'+source[:12];before={};changed=[];probe_path=None
           def digest(raw):return hashlib.sha256(raw).hexdigest()
-          def http(url,headers=None,data=None):
-              with urlopen(Request(url,data=data,headers={'Cache-Control':'no-cache',**(headers or {})}),context=ssl.create_default_context(),timeout=60) as response:return response.status,response.read()
+          def http(url,headers=None):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache',**(headers or {})}),context=ssl.create_default_context(),timeout=120) as response:return response.status,response.read()
           try:
-              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active release'
-              config=r.read('_namira_live/config.local.json');jobs=[]
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected release'
+              config=r.read('_namira_live/config.local.json')
               for item in plan:
-                  target=prefix+'/'+item['path'];raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash'],'Source mismatch'
-                  old=r.read(target);assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected revision: '+item['path'];before[target]=old;jobs.append((target,raw,item['path']));r.put(backup+'/'+item['path'],old,True)
-              for target,raw,relative in jobs:
+                  target=prefix+'/'+item['path'];raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash']
+                  old=r.read(target);assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected installed revision';before[target]=old;r.put(backup+'/'+item['path'],old,True)
+              for item in plan:
+                  target=prefix+'/'+item['path'];raw=Path('namira-source/namira/'+item['path']).read_bytes()
                   if before[target]!=raw:r.put(target,raw,True);changed.append(target)
-                  assert r.read(target)==raw,'Readback mismatch'
-              name='_namira-auth-check-'+secrets.token_hex(16)+'.php';probe_path='admin.naamiraa.ir/'+name;token=secrets.token_hex(32)
+                  assert r.read(target)==raw
+              token=secrets.token_hex(32);name='_namira-sales-'+secrets.token_hex(16)+'.php';probe_path='admin.naamiraa.ir/'+name
               php="""<?php
-          declare(strict_types=1);ini_set('display_errors','0');
-          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_AUTH_CHECK']??''))){http_response_code(404);exit;}
+          declare(strict_types=1);ini_set('display_errors','0');set_time_limit(110);
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_SALES']??''))){http_response_code(404);exit;}
           define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';
-          header('Content-Type: application/json');header('Cache-Control: no-store');$db=Namira\\Db::connect();$_SESSION=[];
-          $count=(int)Namira\\Db::query($db,'SELECT COUNT(*) FROM users')->fetchColumn();
-          set_error_handler(function($s,$m,$f,$l){throw new ErrorException($m,0,$s,$f,$l);});
-          ob_start();view('mobile-login',['db'=>$db,'actor'=>false,'proof'=>['purpose'=>'login','mobile'=>'09999999999','verified_until'=>time()+120],'challenge'=>null,'mode'=>'register','old'=>[]]);$html=ob_get_clean();restore_error_handler();
-          echo json_encode(['completion_rendered'=>str_contains($html,'value="mobile-complete"'),'six_digit_fields'=>substr_count($html,'minlength="6" maxlength="6"')===2,'legacy_link_removed'=>!str_contains($html,'auth-legacy'),'old_password_hint_removed'=>!str_contains($html,'۱۲ نویسه'),'user_count'=>$count,'users_unchanged'=>$count===(int)Namira\\Db::query($db,'SELECT COUNT(*) FROM users')->fetchColumn(),'real_sms_sent'=>0]);
+          header('Content-Type: application/json');header('Cache-Control: no-store');$db=Namira\\Db::connect();
+          $actor=Namira\\Db::query($db,"SELECT id,role,email FROM users WHERE role='superadmin' AND active=1 ORDER BY id LIMIT 1")->fetch();if(!$actor)throw new RuntimeException('No maintenance administrator');
+          $_SESSION=['user_id'=>$actor['id']];$old=Namira\\StoreSettings::get($db);
+          $oldRaw=Namira\\Db::query($db,"SELECT value FROM app_settings WHERE setting_key='store_v21'")->fetchColumn();
+          $p=Namira\\Env::storage().'/backups/before-sales-enable-__SOURCE__.json';if(!is_file($p)){file_put_contents($p,Namira\\Protocol::encode(['setting_key'=>'store_v21','value'=>$oldRaw,'at'=>date(DATE_ATOM)]),LOCK_EX);chmod($p,0600);}
+          if(!$old['enable_sales'])Namira\\StoreSettings::save($db,$actor,['enable_sales'=>true]);
+          $connection='not_configured';$connectionError='';
+          if(Namira\\BaleClient::configured()){
+           try{Namira\\BalePayments::setup($db,$actor,false);$connection='connected';}
+           catch(Namira\\HttpError $e){$connection='needs_attention';$connectionError=$e->getMessage();}
+           catch(Throwable $e){$connection='needs_attention';$connectionError='بررسی اتصال کامل نشد.';}
+          }
+          $settings=Namira\\StoreSettings::get($db);$proof=['sales_enabled'=>(bool)$settings['enable_sales'],'sales_terms_present'=>trim($settings['sales_terms'])!=='','bale_configured'=>Namira\\BaleClient::configured(),'bale_activated'=>Namira\\BalePayments::available(),'connection'=>$connection,'connection_error'=>$connectionError,'orders'=>(int)Namira\\Db::query($db,'SELECT COUNT(*) FROM orders')->fetchColumn(),'real_payments'=>0,'real_sms_sent'=>0];
+          ob_start();view('mobile-login',['db'=>$db,'actor'=>false,'proof'=>['purpose'=>'login','mobile'=>'09999999999','verified_until'=>time()+120],'challenge'=>null,'mode'=>'register','old'=>[]]);$html=ob_get_clean();
+          $proof['minimum_six_fields']=substr_count($html,'minlength="6" maxlength="1024"')===2;
+          $proof['numeric_restriction_removed']=!str_contains($html,'inputmode="numeric"')&&!str_contains($html,'pattern=');
+          echo json_encode($proof,JSON_UNESCAPED_UNICODE);
           """
-              r.put(probe_path,php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest()).encode(),False)
-              code,body=http('https://admin.naamiraa.ir/'+name,{'X-Namira-Auth-Check':token});proof=json.loads(body);assert code==200 and all(proof[k] for k in ['completion_rendered','six_digit_fields','legacy_link_removed','old_password_hint_removed','users_unchanged']),'Hosted completion failed'
-              for route in ['/login','/login?legacy=1']:
-                  code,body=http('https://naamiraa.ir'+route);assert code==200 and b'auth-legacy' not in body and b'name="email"' not in body,'Old public email form still exposed'
-              code,body=http('https://admin.naamiraa.ir/index.php?page=login');assert code==200 and b'name="email"' in body,'Admin login changed'
-              opener=build_opener(HTTPSHandler(context=ssl.create_default_context()),HTTPCookieProcessor(CookieJar()))
-              with opener.open('https://naamiraa.ir/login',timeout=60) as response:login=response.read()
-              csrf=re.search(rb'name="csrf" value="([a-f0-9]{64})"',login).group(1).decode()
-              try:opener.open(Request('https://naamiraa.ir/index.php?page=login',data=urlencode({'action':'login','csrf':csrf,'email':'auth-probe@example.invalid','password':'not-a-real-password'}).encode()),timeout=60)
-              except HTTPError as e:assert e.code==410,'Public email POST not blocked'
-              else:raise RuntimeError('Public email POST was accepted')
-              assert r.read('_namira_live/config.local.json')==config,'Config changed'
-              result={'source':source,'backup':backup,'files_changed':len(changed),'hosted_form':proof,'public_email_post':410,'admin_email_login_preserved':True,'schema_changed':False,'config_changed':False,'real_sms_sent':0}
-              Path('auth-release.json').write_text(json.dumps(result,indent=2));r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan}).encode(),True);print('AUTH_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+              php=php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest()).replace('__SOURCE__',source[:12])
+              r.put(probe_path,php.encode(),False)
+              code,body=http('https://admin.naamiraa.ir/'+name,{'X-Namira-Sales':token});proof=json.loads(body);assert code==200 and proof['sales_enabled'] and proof['minimum_six_fields'] and proof['numeric_restriction_removed'],'Settings/form verification failed'
+              assert r.read('_namira_live/config.local.json')==config,'Private configuration changed'
+              for route in ['/login','/shop','/cart']:
+                  code,body=http('https://naamiraa.ir'+route);assert code==200,'Public route regression'
+              result={'source':source,'backup':backup,'files_changed':len(changed),'proof':proof,'schema_changed':False,'config_changed':False}
+              Path('sales-password-release.json').write_text(json.dumps(result,ensure_ascii=False,indent=2));print('SALES_PASSWORD_RELEASE_VERIFIED '+json.dumps(result,ensure_ascii=False),flush=True)
           except Exception:
               for target in reversed(changed):
                   try:r.put(target,before[target],True)
@@ -108,5 +112,5 @@ jobs:
         if: always()
         with:
           name: naamiraa-member-completion-release
-          path: auth-release.json
+          path: sales-password-release.json
           retention-days: 14
