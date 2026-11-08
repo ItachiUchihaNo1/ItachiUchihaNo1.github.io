@@ -1,0 +1,120 @@
+name: Deploy Naamiraa Bale payments
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-bale.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BALE_SOURCE: '8e197b6ae8371cb17681250b5a516e4b44a251a1'
+      BALE_PLAN: '[{"path":"app/Env.php","oldHash":"e51d3a92b16f9c0055333be491b9a62aadfb267253e25cd266fdbddf0700e0de","newHash":"e0b4df0f12a67f182a3cc77486c6ab16aa0d7620c3426a1829d85d20d22eba93"},{"path":"app/StoreCheckout.php","oldHash":"41959d05df2afc68be1579ba564d5c459d5f9eee9bc16e885c63d178d658e07d","newHash":"817de06aa42cec12803889fb4655bec32f0e6805c2f5345fe1e05ca514e9ddbc"},{"path":"app/StoreHttp.php","oldHash":"f36cb12bc322ed41c531ac9d77beb836ce95dd902346dea07444ea9b392b655b","newHash":"38f485691015e5f78a94c957a941bfb96f4cd90bba43aa6825dc2d588d393ded"},{"path":"app/DomainRouting.php","oldHash":"63a716d6392cf90f5cf9d7b46bf0d0d78761d5fdc615e475c5361c033f2a5cad","newHash":"7a1c74c4eea3bd7681c187963b965eb1d017c375198a928acec20b4d9c00e651"},{"path":"app/Web.php","oldHash":"9b5ff62cf5b9dc18289d1275773b608d0acf8615d6b4a076e04efbf0732b621d","newHash":"1ae27637b0c1ab0b57b502f78f634fc28916f78c138944f55c9417d7a8293194"},{"path":"views/store-order.php","oldHash":"5fd3fd444bd82d281e940776769aff3a3163cc15082b237b4a07ffe399197757","newHash":"8701795faa6994974b8c644e609b626191b964815019c93b6d0afa3eb9ed120c"},{"path":"views/store-cart.php","oldHash":"09d18e546de9e3cb2161a71a6170ecb150e185cdf63c2425f169c2a46fe904e2","newHash":"57ee37a9fa1e7cb1248c7b19944dc3e7a84074d9672e7b8045d1552de3a3ae10"},{"path":"views/store-operations.php","oldHash":"58a7dfbe3ccc525926c503527164f3bbb13ffbd5081dd93f521fa8f263771984","newHash":"abb720090dd64041226ba33aafb371eb63acc255ff481335d3159c236b8f970c"},{"path":"app/StoreOrders.php","oldHash":"c0f62b4e863aeb6aba7022873567ba1149834bfa2b6fefb550d32a06b82ad0c8","newHash":"000688de481ad284a4cddcab78fbcfee9fc8cf90f5ef5ec99da6d22a5d137273"},{"path":"app/BaleClient.php","oldHash":null,"newHash":"a0c509a2c4361ba4d21a142b53a0811fc580dec2a5c0af972200066c3fc92641"},{"path":"app/BaleGateway.php","oldHash":null,"newHash":"ff46edf203f9ddd89d088b7868cb0c1e826499c25772bfe91221b99bcd849fdb"},{"path":"app/BalePaymentSchema.php","oldHash":null,"newHash":"f9c37833d8533cd7af04752af5bc944530ba623a08d40df8a0f1637e954f2193"},{"path":"app/BalePayments.php","oldHash":null,"newHash":"9e75cb8f4c3e64f7c45b443f83d33427782f22925211d50598f87fed483e6ab6"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 8e197b6ae8371cb17681250b5a516e4b44a251a1
+          path: namira-source
+          persist-credentials: false
+      - name: Require exact-source payment checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,time
+          sha=os.environ['BALE_SOURCE']
+          for attempt in range(40):
+              req=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+sha+'&per_page=20',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'Namira-Bale-release','Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=30) as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira Bale payment checks' and r['head_sha']==sha]
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Exact-source payment checks failed')
+              time.sleep(10)
+          else:raise RuntimeError('Passing exact-source payment checks required')
+          PY
+      - name: Back up and deploy payment integration
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,secrets
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['BALE_SOURCE'];plan=json.loads(os.environ['BALE_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f);backup='_namira_live/backups/bale-'+source[:12];changed=[];before={};probe_path=None
+          def digest(raw):return hashlib.sha256(raw).hexdigest()
+          def http(url,headers=None,data=None):
+              with urlopen(Request(url,data=data,headers={'Cache-Control':'no-cache',**(headers or {})}),context=ssl.create_default_context(),timeout=90) as response:return response.status,response.read(),dict(response.headers)
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected release'
+              config=r.read('_namira_live/config.local.json');jobs=[]
+              for item in plan:
+                  target=prefix+'/'+item['path'];raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash'],'Source mismatch'
+                  old=r.maybe(target)
+                  if old is None:assert item['oldHash'] is None,'Existing file absent'
+                  else:assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected existing revision: '+item['path']
+                  before[target]=old;jobs.append((target,raw,item['path']))
+                  if old is not None:r.put(backup+'/'+item['path'],old,True)
+              priority={'app/BaleClient.php':0,'app/BaleGateway.php':1,'app/BalePaymentSchema.php':2,'app/BalePayments.php':3,'app/StoreCheckout.php':4,'app/Env.php':5,'app/StoreOrders.php':6,'app/StoreHttp.php':7,'app/DomainRouting.php':8,'app/Web.php':9}
+              jobs.sort(key=lambda x:priority.get(x[2],10))
+              for target,raw,relative in jobs:
+                  if before[target]!=raw:r.put(target,raw,True);changed.append(target)
+                  assert r.read(target)==raw,'Readback mismatch';print('VERIFIED_FILE '+relative,flush=True)
+              # Explicit authorized additive migration: backs up the DB before creating the isolated provider table.
+              token=secrets.token_hex(32);name='_namira-bale-check-'+secrets.token_hex(16)+'.php';probe_path='admin.naamiraa.ir/'+name
+              php="""<?php
+          declare(strict_types=1);ini_set('display_errors','0');
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_BALE_CHECK']??''))){http_response_code(404);exit;}
+          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');
+          require NAMIRA_SHARED_PATH.'/current.php';
+          header('Content-Type: application/json');header('Cache-Control: no-store');
+          $db=Namira\\Db::connect();$before=Namira\\DataBackup::counts($db);Namira\\BalePaymentSchema::migrate($db);$after=Namira\\DataBackup::counts($db);
+          foreach($before as $table=>$count)if($table!=='migrations'&&$after[$table]<$count)throw new RuntimeException('Unexpected reduced count');
+          $reports=glob(Namira\\Env::storage().'/backups/migration-013-*.json');
+          echo json_encode(['schema_ready'=>Namira\\BalePaymentSchema::ready($db),'backup_report_present'=>count($reports)>0,'order_count'=>$after['orders'],'payment_count'=>$after['payments'],'bale_rows'=>$after['bale_payments'],'configured'=>Namira\\BaleClient::configured(),'activated'=>Namira\\BalePayments::available(),'provider_requests'=>0]);
+          """
+              r.put(probe_path,php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest()).encode(),False)
+              status,body,_=http('https://admin.naamiraa.ir/'+name,{'X-Namira-Bale-Check':token});proof=json.loads(body);assert status==200 and proof['schema_ready'] and proof['backup_report_present'],'Migration not verified'
+              assert r.read('_namira_live/config.local.json')==config,'Private configuration changed'
+              for route in ['/','/images','/shop','/cart','/login']:
+                  status,body,_=http('https://naamiraa.ir'+route);assert status==200,'Public route regression'
+                  if route=='/':assert b'/assets/enamad.png' in body,'Footer regression'
+              status,body,_=http('https://admin.naamiraa.ir/index.php?page=login');assert status==200,'Admin login regression'
+              try:http('https://naamiraa.ir/index.php?page=bale-webhook&key=invalid',{'Content-Type':'application/json'},b'{"update_id":1}')
+              except HTTPError as e:assert e.code==404,'Unguarded webhook'
+              else:raise RuntimeError('Webhook accepted an invalid key')
+              result={'source':source,'backup':backup,'files_changed':len(changed),'migration':'013_bale_payments','proof':proof,'config_changed':False,'real_payments':0,'activation_pending':not proof['activated']}
+              r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan,'migration':proof}).encode(),True)
+              Path('bale-release.json').write_text(json.dumps(result,indent=2));print('BALE_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  try:
+                      if before[target] is None:r.remove_created(target)
+                      else:r.put(target,before[target],True)
+                  except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              # Additive provider table and backup are deliberately preserved on a code rollback.
+              raise
+          finally:
+              if probe_path:r.remove_created(probe_path);print('TEMPORARY_PROBE_REMOVED',flush=True)
+              try:f.quit()
+              except Exception:f.close()
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-bale-release
+          path: bale-release.json
+          retention-days: 14
