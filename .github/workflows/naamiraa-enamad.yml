@@ -1,0 +1,104 @@
+name: Deploy Naamiraa Enamad footer
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-enamad.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ENAMAD_SOURCE: '182e3bf5d9dfabb2beeab62691d3288a558ee519'
+      ENAMAD_PLAN: '[{"path":"app/Security.php","oldHash":"98a1f1e28f8c332c7b69756371af4e0244657b36ffcef9aa567fd95b7e5278c8","newHash":"a580afd99ba92339c89dacbba11f1bf81ea8f5d46561a0699ef753727795e57c"},{"path":"views/layout.php","oldHash":"9a9bbc254aa29dbfd128621b296a427f1e2f16c0f3e588ea31ed93d72d56f014","newHash":"f0bda1c338852ef196678d5a8641b2a2cfcff1b8431d208a552597c49b244bed"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 182e3bf5d9dfabb2beeab62691d3288a558ee519
+          path: namira-source
+          persist-credentials: false
+      - name: Validate PHP and prepare browser
+        run: |
+          php -l namira-source/namira/app/Security.php
+          php -l namira-source/namira/views/layout.php
+          npm install --prefix /tmp/namira-enamad playwright
+          /tmp/namira-enamad/node_modules/.bin/playwright install --with-deps chromium
+      - name: Back up deploy and verify footer on live pages
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          from html.parser import HTMLParser
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['ENAMAD_SOURCE'];plan=json.loads(os.environ['ENAMAD_PLAN']);release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f);backup='_namira_live/backups/enamad-'+source[:12];changed=[];before={}
+          def sha(raw):return hashlib.sha256(raw).hexdigest()
+          class Seal(HTMLParser):
+              def __init__(self):super().__init__();self.in_footer=False;self.links=[];self.images=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='footer':self.in_footer=True
+                  if self.in_footer and tag=='a' and 'trustseal.enamad.ir' in a.get('href',''):self.links.append(a)
+                  if self.in_footer and tag=='img' and 'trustseal.enamad.ir' in a.get('src',''):self.images.append(a)
+              def handle_endtag(self,tag):
+                  if tag=='footer':self.in_footer=False
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active private release'
+              config=r.read('_namira_live/config.local.json')
+              for item in plan:
+                  target=prefix+'/'+item['path'];raw=Path('namira-source/namira/'+item['path']).read_bytes();assert sha(raw)==item['newHash'],'Source mismatch'
+                  old=r.read(target);assert sha(old) in [item['oldHash'],item['newHash']],'Unexpected installed revision'
+                  before[target]=old;r.put(backup+'/'+item['path'],old,True)
+              for item in plan:
+                  target=prefix+'/'+item['path'];raw=Path('namira-source/namira/'+item['path']).read_bytes()
+                  if before[target]!=raw:r.put(target,raw,True);changed.append(target)
+                  assert r.read(target)==raw,'Readback mismatch'
+              for route in ['/','/images','/martyrs','/shop','/artists','/login']:
+                  with urlopen(Request('https://naamiraa.ir'+route,headers={'Cache-Control':'no-cache'}),context=ssl.create_default_context(),timeout=60) as response:
+                      html=response.read().decode();headers=dict(response.headers);status=response.status
+                  assert status==200,'Public route failed'
+                  seal=Seal();seal.feed(html);assert len(seal.links)==1 and len(seal.images)==1,'Shared footer seal missing'
+                  assert seal.links[0]['referrerpolicy']=='origin' and seal.images[0]['referrerpolicy']=='origin','Referrer policy mismatch'
+                  assert 'id=8597340&Code=kyFQctaT7UlV9gevioQWpHMagvRehlyQ' in seal.links[0]['href'],'Seal link mismatch'
+                  csp=next((v for k,v in headers.items() if k.lower()=='content-security-policy'),'')
+                  img=next((v for v in csp.split(';') if v.strip().startswith('img-src')),'');assert 'https://trustseal.enamad.ir' in img,'Image blocked by policy'
+              assert r.read('_namira_live/config.local.json')==config,'Configuration changed'
+              result={'source':source,'backup':backup,'files_changed':len(changed),'verified_public_pages':6,'schema_changed':False,'config_changed':False}
+              r.put(backup+'/manifest.json',json.dumps({'source':source,'files':plan}).encode(),True);Path('enamad-release.json').write_text(json.dumps(result,indent=2));print('ENAMAD_RELEASE_VERIFIED '+json.dumps(result),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  try:r.put(target,before[target],True)
+                  except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              raise
+          finally:
+              try:f.quit()
+              except Exception:f.close()
+          
+          PY
+      - name: Check live mobile and desktop logo
+        run: |
+          cat > /tmp/enamad-check.cjs <<'JS'
+          const fs=require('node:fs'),{chromium}=require('/tmp/namira-enamad/node_modules/playwright');
+          (async()=>{const b=await chromium.launch();try{const p=await b.newPage();const result=[];for(const width of [390,1280]){await p.setViewportSize({width,height:900});await p.goto('https://naamiraa.ir/',{waitUntil:'domcontentloaded'});const logo=p.locator('footer .footer-trust img');await logo.scrollIntoViewIfNeeded();await logo.waitFor();await p.waitForFunction(()=>document.querySelector('footer .footer-trust img').complete,{},{timeout:25000}).catch(()=>{});const data=await logo.evaluate(el=>({complete:el.complete,loaded:el.naturalWidth>0,width:el.getBoundingClientRect().width,referrer:el.referrerPolicy}));if(data.width>120||data.referrer!=='origin')throw Error('Badge layout regression');if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw Error('Horizontal overflow');const link=p.locator('footer .footer-trust a');if((await link.getAttribute('target'))!=='_blank')throw Error('Target mismatch');result.push({viewport:width,...data});await p.screenshot({path:'enamad-'+width+'.png',fullPage:false});}fs.writeFileSync('enamad-browser.json',JSON.stringify(result));console.log('ENAMAD_BROWSER '+JSON.stringify(result));}finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
+          JS
+          node /tmp/enamad-check.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-enamad-verification
+          path: |
+            enamad-release.json
+            enamad-browser.json
+            enamad-*.png
+          retention-days: 14
