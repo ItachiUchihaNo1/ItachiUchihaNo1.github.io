@@ -1,0 +1,68 @@
+name: Complete Naamiraa store settings
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-store-settings.yml']
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  settings:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 89fd584b561a3caf03e91c1d351aa497ec673244
+          path: namira-source
+          persist-credentials: false
+      - name: Back up and complete authorized store settings
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,ssl,secrets,hashlib,json,base64
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          key=secrets.token_hex(32);name='_namira-store-settings-'+secrets.token_hex(16)+'.php';target='admin.naamiraa.ir/'+name
+          php="""<?php
+          declare(strict_types=1);ini_set('display_errors','0');
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_SETTINGS']??''))){http_response_code(404);exit;}
+          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';header('Content-Type: application/json');header('Cache-Control: no-store');
+          $db=Namira\\Db::connect();$actor=Namira\\Db::query($db,"SELECT id,role,email FROM users WHERE role='superadmin' AND active=1 ORDER BY id LIMIT 1")->fetch();if(!$actor)throw new RuntimeException('Administrator required');$_SESSION=['user_id'=>$actor['id']];
+          $before=Namira\\StoreSettings::get($db);$raw=Namira\\Db::query($db,"SELECT value FROM app_settings WHERE setting_key='store_v21'")->fetchColumn();
+          $backup=Namira\\Env::storage().'/backups/store-settings-before-policy-'.bin2hex(random_bytes(8)).'.json';if(file_put_contents($backup,Namira\\Protocol::encode(['key'=>'store_v21','value'=>$raw,'at'=>date(DATE_ATOM)]),LOCK_EX)===false)throw new RuntimeException('Backup failed');chmod($backup,0600);
+          $defaults=json_decode(base64_decode('__PAYLOAD__'),true,16,JSON_THROW_ON_ERROR);$input=['enable_sales'=>true];$changed=[];
+          foreach($defaults as $key=>$value)if(trim((string)($before[$key]??''))===''){$input[$key]=$value;$changed[]=$key;}
+          if(!$before['banners']){$input['banners']=[['title'=>'بانک رایگان تصاویر شهدا','url'=>'/index.php?page=gallery'],['title'=>'درخواست طراحی رایگان','url'=>'/index.php?page=request']];$changed[]='banners';}
+          Namira\\StoreSettings::save($db,$actor,$input);$after=Namira\\StoreSettings::get($db);foreach($input as $key=>$value)if($after[$key]!==$value)throw new RuntimeException('Settings readback mismatch');
+          foreach(['shipping','tax_bps','reservation_minutes','upload_mb','upload_count','download_limit','download_days','notify_sms','notify_email'] as $key)if($after[$key]!==$before[$key])throw new RuntimeException('Unrelated setting changed');
+          echo json_encode(['changed_fields'=>$changed,'sales_enabled'=>(bool)$after['enable_sales'],'sales_terms_present'=>trim($after['sales_terms'])!=='','bale_activated'=>Namira\\BalePayments::available(),'shipping_methods'=>count($after['shipping']),'shipping_unchanged'=>$after['shipping']===$before['shipping'],'published_physical_products'=>(int)Namira\\Db::query($db,"SELECT COUNT(*) FROM products p JOIN store_product_details d ON d.product_id=p.id WHERE p.published=1 AND d.archived=0 AND d.delivery<>'digital'")->fetchColumn(),'settings_backup'=>basename($backup),'orders'=>(int)Namira\\Db::query($db,'SELECT COUNT(*) FROM orders')->fetchColumn(),'real_payments'=>0],JSON_UNESCAPED_UNICODE);
+          """
+          payload={"hero_text":"محصولات هنری، فایل‌های دیجیتال و خدمات سفارشی نامیرا را انتخاب کنید و مراحل سفارش خود را از حساب کاربری پیگیری کنید. بانک تصاویر شهدا و درخواست طراحی رایگان، مستقل از فروشگاه در دسترس‌اند.","sales_terms":"شرایط خرید از فروشگاه نامیرا\n۱. مشخصات، نوع تحویل، قیمت و گزینه‌های هر محصول در صفحه همان محصول اعلام می‌شود. پیش از ثبت سفارش، اطلاعات و مبلغ نهایی را بررسی کنید. قیمت‌های سایت به تومان است و تبدیل مبلغ برای پرداخت بله به‌صورت خودکار انجام می‌شود.\n۲. ثبت سفارش به ورود با شماره همراه تأییدشده و درج اطلاعات صحیح نیاز دارد. برای کالای فیزیکی، نام گیرنده، نشانی و کدپستی دقیق را وارد کنید. اطلاعات لازم برای شخصی‌سازی هر محصول باید پیش از تولید تکمیل شود.\n۳. پرداخت از طریق کیف پول بله انجام می‌شود و سفارش پس از تأیید سمت سرور، پرداخت‌شده محسوب می‌شود. اگر نتیجه پرداخت مشخص نیست، ابتدا از صفحه سفارش وضعیت را بررسی کنید و از پرداخت تکراری خودداری کنید.\n۴. مبلغ کالا یا خدمات و هزینه‌های محاسبه‌شده در صورت‌حساب پیش از پرداخت نمایش داده می‌شوند. شروع تولید سفارش اختصاصی و تحویل فایل نهایی تابع مشخصات همان محصول و وضعیت ثبت‌شده سفارش است.\n۵. برای سفارش‌های نیازمند تأیید طرح، پیش‌نمایش را در صفحه سفارش بررسی کنید. تغییرات پس از تأیید یا شروع تولید باید با پشتیبانی هماهنگ و در پرونده سفارش ثبت شوند.\n۶. در صورت نبود امکان تأمین کالا یا اجرای خدمت، موضوع به خریدار اعلام و مبلغ دریافت‌شده مطابق مقررات مسترد می‌شود. تغییر محصول یا مشخصات سفارش بدون موافقت خریدار انجام نمی‌شود.\n۷. دانلود رایگان تصاویر بانک شهدا به معنی مجوز نامحدود استفاده تجاری نیست. مجوز محصول یا اثر و حقوق پدیدآورنده باید رعایت شود.\n۸. حقوق قانونی خریدار، از جمله حق انصراف در موارد مشمول، محفوظ است. جزئیات لغو، مرجوعی و استرداد در بخش مربوط آمده است. برای پیگیری، از صفحه سفارش به پشتیبانی پیام دهید.","privacy":"حریم خصوصی فروشگاه نامیرا\nنام، شماره همراه و اطلاعات سفارش برای ورود، انجام خرید و پشتیبانی پردازش می‌شوند. نشانی و کدپستی برای سفارش‌های دارای ارسال فیزیکی دریافت می‌شوند و دسترسی به آن‌ها در چارچوب مسئولیت‌های سفارش است.\nفایل‌های شخصی‌سازی، تصاویر ارسالی و پیام‌های سفارش برای انجام همان سفارش استفاده می‌شوند و در آرشیو عمومی منتشر نمی‌شوند، مگر با اجازه صاحب اطلاعات و طی فرایند مجاز انتشار.\nپرداخت در بستر بله انجام می‌شود؛ فروشگاه از شما شماره کارت، رمز کارت یا رمز پویا دریافت نمی‌کند. رمز ورود به‌صورت هش‌شده نگهداری می‌شود.\nپیوندهای خصوصی سفارش و دانلود را در اختیار دیگران قرار ندهید. کد ورود پیامکی و رمز حساب را حتی برای پشتیبانی ارسال نکنید. درخواست اصلاح اطلاعات یا پیگیری حریم خصوصی را از حساب کاربری و پیام سفارش مطرح کنید.","cancellation":"لغو، مرجوعی و استرداد\nتا زمانی که سفارش پرداخت نشده است، امکان لغو آن از صفحه سفارش، در صورت نمایش گزینه لغو، وجود دارد. برای سفارش پرداخت‌شده، درخواست لغو یا مرجوعی را با شماره سفارش از طریق پیام‌های همان سفارش ثبت کنید.\nدر معاملات از راه دورِ مشمول قانون، حق انصراف حداقل هفت روز کاری مطابق قانون تجارت الکترونیکی رعایت می‌شود. شرایط کالاهای شخصی‌سازی‌شده و محتوای دیجیتال با توجه به ماهیت سفارش و استثناهای قانونی بررسی می‌شود؛ این متن به معنی حذف حقوق قانونی خریدار نیست.\nاگر کالای دریافتی با سفارش مغایرت دارد یا نقصی مشاهده می‌کنید، موضوع و در صورت امکان تصویر آن را در صفحه سفارش ارسال کنید تا بررسی و نحوه رفع مشکل اعلام شود. در صورت ارسال کالایی غیر از موضوع سفارش، هزینه بازپس‌فرستادن بر عهده فروشگاه است.\nاگر فروشگاه امکان تأمین کالا یا اجرای خدمت را نداشته باشد، وجه دریافتی مطابق مقررات مسترد می‌شود. تا زمان دریافت تأیید پشتیبانی، کالا را به نشانی نامشخص ارسال نکنید. ثبت درخواست استرداد به‌تنهایی به معنی انجام عملیات بانکی نیست؛ نتیجه از همان پرونده پیگیری می‌شود.","digital_rights":"حقوق استفاده از فایل‌های دیجیتال\nنوع و دامنه مجوز هر فایل، مطابق توضیحات محصول یا اثر است. خرید یا دانلود فایل، مالکیت حقوق معنوی اثر و نام پدیدآورنده را منتقل نمی‌کند.\nبازفروش، واگذاری فایل اصلی به دیگران، انتشار عمومی نسخه خریداری‌شده یا استفاده تجاری فراتر از مجوز اعلام‌شده، نیازمند اجازه صاحب حق است. اگر محصول صراحتاً مجوز گسترده‌تری دارد، همان مجوز ملاک خواهد بود.\nفایل خریداری‌شده پس از تأیید پرداخت یا تکمیل و تحویل سفارش اختصاصی در حساب خریدار قابل دسترسی است. اگر محدودیت تعداد یا مهلت دریافت برای محصول تعیین شده باشد، اطلاعات ثبت‌شده همان خرید ملاک است. برای خرابی فایل یا مشکل دریافت، از صفحه سفارش پیام دهید.","shipping_policy":"ارسال و تحویل سفارش\nهزینه ارسال کالای فیزیکی بر اساس وزن مرسوله و مبدأ و مقصد تعیین می‌شود و باید پیش از پرداخت به خریدار اعلام شود. اگر روش ارسال قابل انتخاب نیست، ثبت خرید آن کالا هنوز آماده نیست.\nکالاهای سفارشی پس از تکمیل تولید و مراحل تأیید موردنیاز آماده ارسال می‌شوند. زمان آماده‌سازی و تحویل تابع مشخصات محصول و اطلاعات ثبت‌شده در پرونده سفارش است.\nنام گیرنده، شماره همراه، نشانی و کدپستی را دقیق ثبت کنید. اصلاح نشانی را پیش از تحویل مرسوله به شرکت حمل از طریق پیام سفارش اعلام کنید.\nپس از ثبت اطلاعات ارسال، وضعیت مرسوله و کد رهگیری در صفحه سفارش نمایش داده می‌شوند. فایل‌های دیجیتال ارسال پستی ندارند و از حساب کاربری دریافت می‌شوند.","contact":"پشتیبانی فروشگاه نامیرا\nبرای پرسش، پیگیری پرداخت، اصلاح مشخصات، درخواست لغو یا گزارش مشکل، وارد حساب کاربری شوید، بخش سفارش‌ها را باز کنید و از صفحه سفارش مربوط به پشتیبانی پیام دهید.\nشماره سفارش و شرح روشن موضوع را درج کنید؛ تصویر مرتبط را در صورت نیاز از همان بخش ارسال کنید. رمز حساب، کد پیامکی یا اطلاعات محرمانه پرداخت را در پیام قرار ندهید.\nنشانی حساب کاربری: https://naamiraa.ir/account/store","faq":"آیا تصاویر بانک شهدا پولی هستند؟\nخیر. دریافت تصاویر عمومی بانک شهدا و ثبت درخواست طراحی رایگان، مستقل از خریدهای فروشگاه است.\n\nچگونه پرداخت کنم؟\nپس از ثبت سفارش، دکمه پرداخت بله را بزنید، بازو را شروع و صورتحساب را پرداخت کنید. سپس به صفحه سفارش برگردید و «بررسی وضعیت پرداخت بله» را انتخاب کنید.\n\nپول پرداخت شده ولی سفارش هنوز تأیید نشده است؛ چه کنم؟\nابتدا وضعیت را از صفحه سفارش بررسی کنید. اگر نتیجه مشخص نشد، از همان صفحه به پشتیبانی پیام دهید و از پرداخت دوباره تا روشن شدن وضعیت خودداری کنید.\n\nفایل خریداری‌شده را کجا دریافت کنم؟\nپس از تأیید پرداخت یا تکمیل خدمت سفارشی، فایل از صفحه سفارش در حساب کاربری در دسترس قرار می‌گیرد.\n\nچگونه سفارش اختصاصی را پیگیری کنم؟\nمشخصات و فایل‌های موردنیاز محصول را ثبت کنید و پیام‌ها، پیش‌نمایش‌ها و وضعیت انجام کار را از همان سفارش ببینید.\n\nآیا امکان لغو یا مرجوعی وجود دارد؟\nدرخواست را از صفحه سفارش مطرح کنید. وضعیت آن مطابق نوع محصول، مرحله انجام سفارش و حقوق قانونی خریدار بررسی می‌شود.","purchase_guide":"راهنمای خرید از نامیرا\n۱. محصول را انتخاب و توضیحات، نوع تحویل، قیمت و مجوز آن را بخوانید.\n۲. اگر محصول گزینه یا فرم اختصاصی دارد، اطلاعات و فایل‌های لازم را تکمیل کنید و محصول را به سبد خرید اضافه کنید.\n۳. با شماره همراه تأییدشده وارد شوید. برای کالای فیزیکی، مشخصات گیرنده، نشانی، کدپستی و روش ارسال را انتخاب کنید.\n۴. مبلغ نهایی، شرایط فروش و اطلاعات سفارش را بررسی و سفارش را ثبت کنید.\n۵. از صفحه سفارش وارد بازوی بله شوید و صورتحساب را از کیف پول بله پرداخت کنید. سپس به نامیرا بازگردید و وضعیت پرداخت را بررسی کنید.\n۶. تأیید پرداخت، مراحل آماده‌سازی، پیش‌نمایش طرح، فایل‌های تحویلی و اطلاعات ارسال را از صفحه سفارش پیگیری کنید.\n۷. برای هر پرسش یا مشکل، پیام را در همان سفارش ثبت کنید."}
+          try:
+              php=php.replace('__HASH__',hashlib.sha256(key.encode()).hexdigest()).replace('__PAYLOAD__',base64.b64encode(json.dumps(payload,ensure_ascii=False).encode()).decode())
+              r.put(target,php.encode(),False)
+              with urlopen(Request('https://admin.naamiraa.ir/'+name,headers={'X-Namira-Settings':key}),context=ssl.create_default_context(),timeout=60) as response:proof=json.loads(response.read())
+              for section in ['sales-terms','privacy','cancellation','digital-rights','shipping-policy','contact','faq','purchase-guide']:
+                  with urlopen('https://naamiraa.ir/help/'+section,context=ssl.create_default_context(),timeout=60) as response:
+                      body=response.read().decode();assert response.status==200 and 'Fatal error' not in body,'Policy page failed'
+              Path('store-settings-result.json').write_text(json.dumps(proof,ensure_ascii=False,indent=2));print('STORE_SETTINGS_COMPLETED '+json.dumps(proof,ensure_ascii=False),flush=True)
+          finally:
+              r.remove_created(target);print('TEMPORARY_PROBE_REMOVED',flush=True);f.quit()
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-store-settings
+          path: store-settings-result.json
+          retention-days: 14
