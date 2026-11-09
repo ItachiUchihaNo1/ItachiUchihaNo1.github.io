@@ -1,0 +1,68 @@
+name: Inspect Naamiraa missing images
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-image-audit.yml']
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 89fd584b561a3caf03e91c1d351aa497ec673244
+          path: namira-source
+          persist-credentials: false
+      - name: Read-only file and image HTTP audit
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,ssl,secrets,hashlib,json,html
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          from urllib.parse import urljoin
+          from html.parser import HTMLParser
+          from concurrent.futures import ThreadPoolExecutor
+          sys.path.insert(0,'namira-source/namira/deploy');import domains as d
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f);key=secrets.token_hex(32);name='_namira-images-'+secrets.token_hex(16)+'.php';target='admin.naamiraa.ir/'+name
+          php="""<?php
+          declare(strict_types=1);ini_set('display_errors','0');
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_IMAGE_AUDIT']??''))){http_response_code(404);exit;}
+          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';
+          header('Content-Type: application/json');header('Cache-Control: no-store');$db=Namira\\Db::connect();$files=[];
+          $check=function($key,$relative)use(&$files){try{$file=Namira\\Upload::absolute($relative);$info=@getimagesize($file);$files[]=['key'=>$key,'exists'=>true,'readable'=>is_readable($file),'bytes'=>filesize($file),'valid_image'=>(bool)$info];}catch(Throwable){$files[]=['key'=>$key,'exists'=>false];}};
+          foreach(Namira\\Db::query($db,'SELECT id,original_path,preview_path,thumb_path FROM images ORDER BY id LIMIT 500')->fetchAll() as $i)foreach(['original_path','preview_path','thumb_path'] as $k)$check('image:'.$i['id'].':'.$k,$i[$k]);
+          foreach(Namira\\Db::query($db,'SELECT id,path,preview_path FROM store_media ORDER BY id LIMIT 100')->fetchAll() as $i)foreach(['path','preview_path'] as $k)$check('product:'.$i['id'].':'.$k,$i[$k]);
+          foreach(Namira\\Db::query($db,'SELECT id,path,mime FROM file_assets ORDER BY id LIMIT 100')->fetchAll() as $i)if(str_starts_with($i['mime'],'image/'))$check('asset:'.$i['id'],$i['path']);
+          echo json_encode(['files'=>$files,'admin_media_url'=>url('admin-media',['id'=>1]),'storage_configured'=>Namira\\Env::get('STORAGE_PATH')!=='']);
+          """
+          try:
+              r.put(target,php.replace('__HASH__',hashlib.sha256(key.encode()).hexdigest()).encode(),False)
+              with urlopen(Request('https://admin.naamiraa.ir/'+name,headers={'X-Namira-Image-Audit':key}),context=ssl.create_default_context(),timeout=60) as response:proof=json.loads(response.read())
+              class Images(HTMLParser):
+                  def __init__(self):super().__init__();self.urls=[]
+                  def handle_starttag(self,tag,attrs):
+                      a=dict(attrs)
+                      if tag=='img' and a.get('src'):self.urls.append(urljoin('https://naamiraa.ir/',html.unescape(a['src'])))
+              parser=Images()
+              with urlopen('https://naamiraa.ir/',context=ssl.create_default_context(),timeout=60) as response:parser.feed(response.read().decode())
+              def check(url):
+                  if not url.startswith('https://naamiraa.ir/'):return {'url':url,'external':True}
+                  try:
+                      with urlopen(Request(url,headers={'Referer':'https://naamiraa.ir/'}),context=ssl.create_default_context(),timeout=20) as response:return {'url':url,'status':response.status,'type':response.headers.get('Content-Type'),'bytes':len(response.read())}
+                  except HTTPError as e:return {'url':url,'status':e.code}
+                  except Exception:return {'url':url,'network_error':True}
+              with ThreadPoolExecutor(max_workers=5) as pool:proof['homepage']=list(pool.map(check,sorted(set(parser.urls))))
+              print('NAMIRA_IMAGE_AUDIT '+json.dumps(proof),flush=True)
+          finally:r.remove_created(target);f.quit()
+          
+          PY
