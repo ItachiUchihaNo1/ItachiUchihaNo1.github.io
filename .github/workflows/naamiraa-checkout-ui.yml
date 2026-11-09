@@ -1,0 +1,116 @@
+name: Deploy Naamiraa checkout UI
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-checkout-ui.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE: '7e75ac26403586274d185cfb36c4a72a7c86e8f5'
+      PLAN: '[{"path":"app/Security.php","oldHash":"a580afd99ba92339c89dacbba11f1bf81ea8f5d46561a0699ef753727795e57c","newHash":"a333cc5ce8069552083a1e165a160ced5f0b52c81e6144d1448639a859034700"},{"path":"app/StoreHttp.php","oldHash":"6a234b8f9996703129345ce3390e946cf3f6efa10eb34fb18fc03e93b721c98e","newHash":"ec0c264c4e5e17b5be7282f4b371167887c883f8d7ba5b3bcacc6830ff214edb"},{"path":"views/store-cart.php","oldHash":"a3469bcba183ffdeb460ed43a6a2b6d188b6b988b29d9fb3cff847b0232d0697","newHash":"00b788fecc5e7b5354c9074271e14cf735917617cb45ad135543bc112017b60e"},{"path":"views/store-order.php","oldHash":"8e0689d540423b09a51a9f34504ace19949207920ccae5866e92ddcb3ebcb4d9","newHash":"b2a31eabc825da7e9761c43c0c705ae330c153b5f00d1c18532921bdb05bddd5"},{"path":"public/assets/store.css","oldHash":"539edd14e40da4617f6dd464bcc8d417e4bc404ad6b1ed320afd706a14567517","newHash":"09939687ce0ffaa52c228fee143e7976a064f09d5ab6ee648586790da878f957"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 7e75ac26403586274d185cfb36c4a72a7c86e8f5
+          path: namira-source
+          persist-credentials: false
+      - name: Require passing exact source checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,time
+          for attempt in range(30):
+              req=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+os.environ['SOURCE']+'&per_page=30',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'Namira-release'})
+              with urllib.request.urlopen(req,timeout=30) as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira checkout UI checks']
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Source checks failed')
+              time.sleep(10)
+          else:raise RuntimeError('Source checks required')
+          PY
+      - name: Back up and deploy checkout and payment handoff
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,secrets
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['SOURCE'];plan=json.loads(os.environ['PLAN'])
+          release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          backup='_namira_live/backups/checkout-ui-'+source[:12];before={};changed=[];probe=None
+          def digest(raw):return hashlib.sha256(raw).hexdigest() if raw is not None else None
+          def http(url,headers=None):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache',**(headers or {})}),context=ssl.create_default_context(),timeout=90) as response:return response.status,response.read()
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active release'
+              config=r.read('_namira_live/config.local.json')
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash']
+                  targets=[prefix+'/'+item['path']]
+                  if item['path'].startswith('public/assets/'):
+                      targets += [root+'/'+item['path'][7:] for root in ['public_html','admin.naamiraa.ir']]
+                  item['targets']=targets
+                  for target in targets:
+                      old=r.maybe(target);assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected installed revision: '+target
+                      before[target]=old
+                      if old is not None:r.put(backup+'/'+target,old,True)
+              # New assets and dependencies first; shared layout and router last.
+              for item in sorted(plan,key=lambda x:x['path'] in ['views/layout.php','app/DomainRouting.php']):
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes()
+                  for target in item['targets']:
+                      if before[target]!=raw:r.put(target,raw,not target.startswith(('public_html/','admin.naamiraa.ir/')));changed.append(target)
+                      assert r.read(target)==raw
+              token=secrets.token_hex(32);name='_namira-checkout-'+secrets.token_hex(16)+'.php';probe='admin.naamiraa.ir/'+name
+              php=r'''<?php
+          declare(strict_types=1);ini_set('display_errors','0');
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_FINISH']??''))){http_response_code(404);exit;}
+          define('NAMIRA_SURFACE','public');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');clearstatcache();
+          if(function_exists('opcache_invalidate'))foreach(['app/Security.php','app/StoreHttp.php','views/store-cart.php','views/store-order.php'] as $file)opcache_invalidate(NAMIRA_SHARED_PATH.'/releases/fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57/'.$file,true);
+          require NAMIRA_SHARED_PATH.'/current.php';Namira\Security::balePaymentHeaders();header('Content-Type: application/json');header('Cache-Control: no-store');$db=Namira\Db::connect();$_SESSION=[];
+          $proof=['bale_activated'=>Namira\BalePayments::available(),'schema_changed'=>false,'orders_modified'=>false,'real_payments'=>0];$csp='';foreach(headers_list() as $h)if(str_starts_with($h,'Content-Security-Policy:'))$csp=$h;$proof['handoff_csp']=str_contains($csp,"form-action 'self' https://ble.ir;");
+          $owner=Namira\Db::query($db,'SELECT u.id,u.email,u.role,d.order_id FROM store_order_details d JOIN users u ON u.id=d.user_id ORDER BY d.order_id LIMIT 1')->fetch();
+          if($owner){$data=Namira\StoreOrders::get($db,$owner,(int)$owner['order_id']);ob_start();view('store-order',$data+['db'=>$db,'user'=>$owner,'old'=>[]]);$html=ob_get_clean();$proof['order_rendered']=str_contains($html,'store-customer')&&str_contains($html,'store-message-form');$proof['reservation_expired']=(int)$data['o']['expires_at']<time();$proof['order_status']=$data['o']['status'];}
+          echo json_encode($proof,JSON_UNESCAPED_UNICODE);
+          '''
+              php=php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest());r.put(probe,php.encode(),False)
+              status,body=http('https://admin.naamiraa.ir/'+name,{'X-Namira-Finish':token});proof=json.loads(body)
+              assert proof['handoff_csp'] and proof.get('order_rendered',True),'Hosted order/CSP verification failed'
+              assert r.read('_namira_live/config.local.json')==config,'Private config changed'
+              for route in ['/','/shop','/cart','/login']:
+                  status,body=http('https://naamiraa.ir'+route);assert status==200 and b'Fatal error' not in body,'Route regression '+route
+              Path('checkout-ui-result.json').write_text(json.dumps({'source':source,'backup':backup,'files_changed':len(changed),'proof':proof},ensure_ascii=False,indent=2))
+              print('CHECKOUT_UI_VERIFIED '+json.dumps(proof,ensure_ascii=False),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  try:
+                      if before[target] is None:r.remove_created(target)
+                      else:r.put(target,before[target],not target.startswith(('public_html/','admin.naamiraa.ir/')))
+                  except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              raise
+          finally:
+              if probe:r.remove_created(probe);print('TEMPORARY_PROBE_REMOVED',flush=True)
+              try:f.quit()
+              except Exception:f.close()
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-checkout-ui
+          path: checkout-ui-result.json
+          retention-days: 14
