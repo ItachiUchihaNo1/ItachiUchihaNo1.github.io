@@ -1,0 +1,139 @@
+name: Deploy Naamiraa footer postpaid
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-footer-postpaid.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE: '50a8764690ccb7d8c05b1fb8b4c05eed61915db6'
+      PLAN: '[{"path":"app/DomainRouting.php","oldHash":"7a1c74c4eea3bd7681c187963b965eb1d017c375198a928acec20b4d9c00e651","newHash":"eb588dbd8b4c7bea67cde56ded68ff58df6d43b356ea75ba6d475a56d7ea5ccd"},{"path":"app/StoreSettings.php","oldHash":"0be2186d8190dced7386c00ad66ab9f442f4ee3634308f8255a5dafd1ec68aa2","newHash":"101f652f8ac8a21b7cb84f0e75a490500e91f7e84aa255b600c1f0f58fbc4a8a"},{"path":"app/StoreCheckout.php","oldHash":"817de06aa42cec12803889fb4655bec32f0e6805c2f5345fe1e05ca514e9ddbc","newHash":"5f24f54fda1cef4f693521e31c9e28ba03523550d09c6f315a4cb952f175c6f4"},{"path":"app/StoreHttp.php","oldHash":"38f485691015e5f78a94c957a941bfb96f4cd90bba43aa6825dc2d588d393ded","newHash":"6a234b8f9996703129345ce3390e946cf3f6efa10eb34fb18fc03e93b721c98e"},{"path":"views/store-cart.php","oldHash":"57ee37a9fa1e7cb1248c7b19944dc3e7a84074d9672e7b8045d1552de3a3ae10","newHash":"a3469bcba183ffdeb460ed43a6a2b6d188b6b988b29d9fb3cff847b0232d0697"},{"path":"views/store-order.php","oldHash":"8701795faa6994974b8c644e609b626191b964815019c93b6d0afa3eb9ed120c","newHash":"8e0689d540423b09a51a9f34504ace19949207920ccae5866e92ddcb3ebcb4d9"},{"path":"views/store-operations.php","oldHash":"abb720090dd64041226ba33aafb371eb63acc255ff481335d3159c236b8f970c","newHash":"b5df8af5bed66be5946c4b5f28e5feda9657ab929da36be7cc42990f7f90c51d"},{"path":"views/layout.php","oldHash":"3abd12075e9bfc8892a347dc7599847295e19af9e0f094e9ea4d7fd9e78cd373","newHash":"6ace32a0cdf1f80be9100defd366100a4ccdc0ce029e0c4a5ca610f5a391334f"},{"path":"views/footer.php","oldHash":null,"newHash":"b607206869f784d5dbb63c946dcca8dacacea7b8e9ee1b266d100515249e0e10"},{"path":"public/assets/footer.css","oldHash":null,"newHash":"a641380247f8b7ac2545d32023c4342c8e1d5af24e623e6fedb24c181bef9206"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 50a8764690ccb7d8c05b1fb8b4c05eed61915db6
+          path: namira-source
+          persist-credentials: false
+      - name: Require passing exact source checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,time
+          for attempt in range(30):
+              req=urllib.request.Request('https://api.github.com/repos/ItachiUchihaNo1/heiat-network/actions/runs?head_sha='+os.environ['SOURCE']+'&per_page=30',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'Namira-release'})
+              with urllib.request.urlopen(req,timeout=30) as response:runs=json.load(response)['workflow_runs']
+              matches=[r for r in runs if r['name']=='Namira footer postpaid checks']
+              if any(r['conclusion']=='success' for r in matches):break
+              if matches and all(r['status']=='completed' for r in matches):raise RuntimeError('Source checks failed')
+              time.sleep(10)
+          else:raise RuntimeError('Source checks required')
+          PY
+      - name: Back up and deploy authorized changes
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,json,ssl,hashlib,secrets
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['SOURCE'];plan=json.loads(os.environ['PLAN'])
+          release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          backup='_namira_live/backups/footer-postpaid-'+source[:12];before={};changed=[];probe=None
+          def digest(raw):return hashlib.sha256(raw).hexdigest() if raw is not None else None
+          def http(url,headers=None):
+              with urlopen(Request(url,headers={'Cache-Control':'no-cache',**(headers or {})}),context=ssl.create_default_context(),timeout=90) as response:return response.status,response.read()
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected active release'
+              config=r.read('_namira_live/config.local.json')
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash']
+                  targets=[prefix+'/'+item['path']]
+                  if item['path'].startswith('public/assets/'):
+                      targets += [root+'/'+item['path'][7:] for root in ['public_html','admin.naamiraa.ir']]
+                  item['targets']=targets
+                  for target in targets:
+                      old=r.maybe(target);assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected installed revision: '+target
+                      before[target]=old
+                      if old is not None:r.put(backup+'/'+target,old,True)
+              # New assets and dependencies first; shared layout and router last.
+              for item in sorted(plan,key=lambda x:x['path'] in ['views/layout.php','app/DomainRouting.php']):
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes()
+                  for target in item['targets']:
+                      if before[target]!=raw:r.put(target,raw,not target.startswith(('public_html/','admin.naamiraa.ir/')));changed.append(target)
+                      assert r.read(target)==raw
+              token=secrets.token_hex(32);name='_namira-postpaid-'+secrets.token_hex(16)+'.php';probe='admin.naamiraa.ir/'+name
+              php=r'''<?php
+          declare(strict_types=1);ini_set('display_errors','0');
+          if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_FINISH']??''))){http_response_code(404);exit;}
+          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';
+          header('Content-Type: application/json');header('Cache-Control: no-store');$db=Namira\Db::connect();
+          $actor=Namira\Db::query($db,"SELECT id,role,email FROM users WHERE role='superadmin' AND active=1 ORDER BY id LIMIT 1")->fetch();if(!$actor)throw new RuntimeException('Administrator required');$_SESSION=['user_id'=>$actor['id']];
+          $before=Namira\StoreSettings::get($db);$raw=Namira\Db::query($db,"SELECT value FROM app_settings WHERE setting_key='store_v21'")->fetchColumn();
+          $backup=Namira\Env::storage().'/backups/before-postpaid-__SOURCE__.json';if(!is_file($backup)){if(file_put_contents($backup,Namira\Protocol::encode(['key'=>'store_v21','value'=>$raw,'at'=>date(DATE_ATOM)]),LOCK_EX)===false)throw new RuntimeException('Backup failed');chmod($backup,0600);}
+          $method=['id'=>'postpaid','title'=>'پس‌کرایه؛ هزینه حمل جداگانه با خریدار','base'=>0,'per_kg'=>0,'free_above'=>0,'provinces'=>[],'cities'=>[],'collect_on_delivery'=>true];
+          if($before['shipping']&&$before['shipping']!==[$method])throw new RuntimeException('Shipping changed since authorized audit');
+          $policy="ارسال و تحویل سفارش\nارسال کالای فیزیکی فعلاً به‌صورت پس‌کرایه است. هزینه حمل در مبلغ پرداخت آنلاین فروشگاه منظور نمی‌شود و خریدار آن را جداگانه به شرکت حمل پرداخت می‌کند؛ این روش به معنی ارسال رایگان نیست. مبلغ حمل براساس وزن مرسوله، مسیر و تعرفه شرکت حمل تعیین می‌شود.\nکالاهای سفارشی پس از تکمیل تولید و تأییدهای لازم آماده ارسال می‌شوند. زمان آماده‌سازی تابع مشخصات محصول و وضعیت سفارش است.\nنام گیرنده، شماره همراه، نشانی و کدپستی را دقیق ثبت کنید. تغییر نشانی را پیش از تحویل مرسوله به شرکت حمل از طریق پیام سفارش اعلام کنید. پس از ثبت ارسال، اطلاعات و کد رهگیری در صفحه سفارش نمایش داده می‌شوند. فایل دیجیتال ارسال پستی ندارد و از حساب کاربری دریافت می‌شود.";
+          Namira\StoreSettings::save($db,$actor,['shipping'=>[$method],'shipping_policy'=>$policy]);$after=Namira\StoreSettings::get($db);
+          foreach($before as $k=>$value)if(!in_array($k,['shipping','shipping_policy'],true)&&$after[$k]!==$value)throw new RuntimeException('Unrelated setting modified');
+          if($after['shipping']!==[$method]||$after['shipping_policy']!==$policy)throw new RuntimeException('Readback failed');
+          $proof=['postpaid_enabled'=>true,'online_carriage_charge'=>Namira\StoreSettings::shipping($after,'postpaid',[],10000,5000),'admin_media_url'=>url('admin-media',['id'=>1]),'sales_enabled'=>$after['enable_sales'],'sales_terms_present'=>trim($after['sales_terms'])!=='','bale_activated'=>Namira\BalePayments::available(),'orders'=>(int)Namira\Db::query($db,'SELECT COUNT(*) FROM orders')->fetchColumn(),'real_payments'=>0,'real_sms'=>0];
+          echo json_encode($proof,JSON_UNESCAPED_UNICODE);
+          '''
+              php=php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest()).replace('__SOURCE__',source[:12]);r.put(probe,php.encode(),False)
+              status,body=http('https://admin.naamiraa.ir/'+name,{'X-Namira-Finish':token});proof=json.loads(body)
+              assert proof['postpaid_enabled'] and proof['online_carriage_charge']==0 and proof['admin_media_url'].startswith('/index.php?page=admin-media')
+              assert r.read('_namira_live/config.local.json')==config,'Private config changed'
+              for route in ['/','/images','/martyrs','/shop','/login','/help/shipping-policy']:
+                  status,body=http('https://naamiraa.ir'+route);assert status==200 and b'Fatal error' not in body,'Route regression '+route
+                  assert 'همراهان نامیرا'.encode() not in body,'Unexpected companions section'
+                  assert b'nm-footer' in body,'Shared footer missing'
+              Path('footer-postpaid-result.json').write_text(json.dumps({'source':source,'backup':backup,'files_changed':len(changed),'proof':proof,'schema_changed':False},ensure_ascii=False,indent=2))
+              print('FOOTER_POSTPAID_VERIFIED '+json.dumps(proof,ensure_ascii=False),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  try:
+                      if before[target] is None:r.remove_created(target)
+                      else:r.put(target,before[target],not target.startswith(('public_html/','admin.naamiraa.ir/')))
+                  except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              raise
+          finally:
+              if probe:r.remove_created(probe);print('TEMPORARY_PROBE_REMOVED',flush=True)
+              try:f.quit()
+              except Exception:f.close()
+          
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Public mobile and desktop checks
+        run: |
+          node <<'JS'
+          const {chromium}=require('playwright');const fs=require('fs');
+          (async()=>{const browser=await chromium.launch();const results=[];for(const width of [320,390,1280]){const page=await browser.newPage({viewport:{width,height:900}});await page.goto('https://naamiraa.ir/',{waitUntil:'networkidle'});await page.locator('.nm-footer').scrollIntoViewIfNeeded();await page.waitForTimeout(700);const proof=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth,companions:document.querySelector('.nm-footer-companions')!==null,seal:(()=>{let i=document.querySelector('.nm-footer-seal img');return !!i&&i.complete&&i.naturalWidth>0})(),badImages:[...document.images].filter(i=>i.loading!=='lazy'&&(!i.complete||!i.naturalWidth)).map(i=>i.src),footer:document.querySelector('.nm-footer').getBoundingClientRect().width}));if(proof.overflow||proof.companions||!proof.seal||proof.badImages.length)throw Error(JSON.stringify({width,...proof}));await page.screenshot({path:'footer-'+width+'.png',fullPage:true});results.push({width,...proof});await page.close();}await browser.close();fs.writeFileSync('footer-browser-result.json',JSON.stringify(results,null,2));console.log(JSON.stringify(results));})().catch(e=>{console.error(e);process.exit(1)});
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-footer-postpaid
+          path: |
+            footer-postpaid-result.json
+            footer-browser-result.json
+            footer-*.png
+          retention-days: 14
