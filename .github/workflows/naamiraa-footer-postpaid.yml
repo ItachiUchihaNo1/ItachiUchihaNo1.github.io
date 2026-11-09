@@ -79,7 +79,7 @@ jobs:
               php=r'''<?php
           declare(strict_types=1);ini_set('display_errors','0');
           if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_FINISH']??''))){http_response_code(404);exit;}
-          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');require NAMIRA_SHARED_PATH.'/current.php';
+          define('NAMIRA_SURFACE','admin');define('NAMIRA_SHARED_PATH',dirname(__DIR__).'/_namira_live');clearstatcache();if(function_exists('opcache_invalidate'))foreach(['app/DomainRouting.php','app/StoreSettings.php','app/StoreCheckout.php','app/StoreHttp.php','views/store-cart.php','views/store-order.php','views/store-operations.php','views/layout.php','views/footer.php'] as $file)opcache_invalidate(NAMIRA_SHARED_PATH.'/releases/fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57/'.$file,true);require NAMIRA_SHARED_PATH.'/current.php';
           header('Content-Type: application/json');header('Cache-Control: no-store');$db=Namira\Db::connect();
           $actor=Namira\Db::query($db,"SELECT id,role,email FROM users WHERE role='superadmin' AND active=1 ORDER BY id LIMIT 1")->fetch();if(!$actor)throw new RuntimeException('Administrator required');$_SESSION=['user_id'=>$actor['id']];
           $before=Namira\StoreSettings::get($db);$raw=Namira\Db::query($db,"SELECT value FROM app_settings WHERE setting_key='store_v21'")->fetchColumn();
@@ -95,6 +95,7 @@ jobs:
           '''
               php=php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest()).replace('__SOURCE__',source[:12]);r.put(probe,php.encode(),False)
               status,body=http('https://admin.naamiraa.ir/'+name,{'X-Namira-Finish':token});proof=json.loads(body)
+              print('HOSTED_POSTPAID_PROOF '+json.dumps(proof,ensure_ascii=False),flush=True)
               assert proof['postpaid_enabled'] and proof['online_carriage_charge']==0 and proof['admin_media_url'].startswith('/index.php?page=admin-media')
               assert r.read('_namira_live/config.local.json')==config,'Private config changed'
               for route in ['/','/images','/martyrs','/shop','/login','/help/shipping-policy']:
