@@ -66,7 +66,10 @@ jobs:
                       targets += [root+'/'+item['path'][7:] for root in ['public_html','admin.naamiraa.ir']]
                   item['targets']=targets
                   for target in targets:
-                      old=r.maybe(target);assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected installed revision: '+target
+                      old=r.maybe(target)
+                      if item['path'].startswith('public/assets/') and target.startswith(prefix+'/'):
+                          assert all(digest(r.read(root+'/'+item['path'][7:])) in [item['oldHash'],item['newHash']] for root in ['public_html','admin.naamiraa.ir']),'Public asset revisions differ'
+                      else:assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected installed revision: '+target
                       before[target]=old
                       if old is not None:r.put(backup+'/'+target,old,True)
               # New assets and dependencies first; shared layout and router last.
