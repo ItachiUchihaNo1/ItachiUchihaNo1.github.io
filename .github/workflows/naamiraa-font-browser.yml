@@ -1,0 +1,48 @@
+name: Verify Naamiraa font in Chrome
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-font-browser.yml']
+permissions:
+  contents: read
+jobs:
+  chrome:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify fonts with installed Chrome
+        run: |
+          node <<'JS'
+          const fs=require('fs'),cp=require('child_process'),dns=require('dns').promises;
+          (async()=>{
+            const ip=(await dns.lookup('cp173.mihanvps.com')).address;
+            const child=cp.spawn('google-chrome',['--headless=new','--no-sandbox','--disable-gpu','--remote-debugging-port=9222','--user-data-dir=/tmp/namira-font-chrome','--host-resolver-rules=MAP naamiraa.ir '+ip+', MAP admin.naamiraa.ir '+ip,'about:blank'],{stdio:'ignore'});
+            try{
+              let version;for(let i=0;i<40;i++){try{version=await(await fetch('http://127.0.0.1:9222/json/version')).json();break;}catch{await new Promise(r=>setTimeout(r,250));}}
+              if(!version)throw Error('Chrome did not start');
+              const target=await(await fetch('http://127.0.0.1:9222/json/new?about:blank',{method:'PUT'})).json();
+              const ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true});});
+              let seq=0;const pending=new Map();ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}});
+              const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
+              await call('Page.enable');await call('Runtime.enable');const results=[];
+              for(const url of ['https://naamiraa.ir/','https://naamiraa.ir/login','https://admin.naamiraa.ir/index.php?page=login'])for(const width of [390,1280]){
+                await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
+                await call('Page.navigate',{url});await new Promise(r=>setTimeout(r,1800));
+                const value=await call('Runtime.evaluate',{expression:`(async()=>{for(let i=0;i<40&&(!document.querySelector('link[href*="fonts.css"]')||document.readyState!=='complete');i++)await new Promise(r=>setTimeout(r,250));for(let w=100;w<=900;w+=100)await document.fonts.load(w+' 18px Peyda','نامیرا ۱۲۳');await document.fonts.ready;return {url:location.href,family:getComputedStyle(document.body).fontFamily,loaded:[...document.fonts].filter(f=>f.family.replace(/["']/g,'')==='Peyda'&&f.status==='loaded').length,controls:[...document.querySelectorAll('button,input,select,textarea')].every(e=>getComputedStyle(e).fontFamily.includes('Peyda')),overflow:document.documentElement.scrollWidth>innerWidth,externalFont:!!document.querySelector('link[href*="fonts.googleapis.com"]')}})()`,awaitPromise:true,returnByValue:true});
+                if(value.exceptionDetails)throw Error(JSON.stringify(value.exceptionDetails));const p=value.result.value;if(!p.family.includes('Peyda')||p.loaded!==9||!p.controls||p.overflow||p.externalFont)throw Error(JSON.stringify({width,...p}));results.push({width,...p});const shot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync('font-'+results.length+'.png',Buffer.from(shot.data,'base64'));
+              }
+              ws.close();fs.writeFileSync('font-browser.json',JSON.stringify(results,null,2));console.log('FONT_CHROME_VERIFIED '+JSON.stringify(results));
+            }finally{child.kill();}
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: font-chrome-verification
+          path: |
+            font-browser.json
+            font-*.png
+          retention-days: 14
