@@ -32,7 +32,7 @@ jobs:
       - name: Back up and deploy local fonts
         run: |
           python3 -u - <<'PY'
-          import os,sys,ssl,json,hashlib,secrets
+          import os,sys,ssl,json,hashlib,secrets,socket
           from pathlib import Path
           from urllib.request import Request,urlopen
           sys.path.insert(0,'namira-source/namira/deploy')
@@ -40,6 +40,11 @@ jobs:
           source=os.environ['SOURCE'];plan=json.loads(os.environ['PLAN'])
           release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
           f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          origin_ip=f.sock.getpeername()[0]
+          original_getaddrinfo=socket.getaddrinfo
+          def origin_dns(host,port,*args,**kwargs):
+              return original_getaddrinfo(origin_ip if host in ['naamiraa.ir','admin.naamiraa.ir'] else host,port,*args,**kwargs)
+          socket.getaddrinfo=origin_dns
           before={};changed=[];probe=None;backup='_namira_live/backups/peyda-'+source[:12]
           def digest(raw):return hashlib.sha256(raw).hexdigest() if raw is not None else None
           try:
@@ -67,7 +72,7 @@ jobs:
               r.put(probe,php.encode(),False)
               with urlopen(Request('https://admin.naamiraa.ir/'+name,headers={'X-Namira-Font':token}),context=ssl.create_default_context(),timeout=60) as response:assert json.load(response)['ok']
               assert r.read('_namira_live/config.local.json')==config,'Private configuration changed'
-              result={'source':source,'backup':backup,'files_changed':len(changed),'weights':9,'database_changed':False}
+              result={'source':source,'backup':backup,'files_changed':len(changed),'weights':9,'database_changed':False,'origin_ip':origin_ip,'verification_uses_origin_ip':True}
               Path('peyda-release.json').write_text(json.dumps(result,indent=2));print('PEYDA_DEPLOYED '+json.dumps(result),flush=True)
           except Exception:
               for target in reversed(changed):
@@ -92,7 +97,7 @@ jobs:
         run: |
           node <<'JS'
           const {chromium}=require('playwright'),fs=require('fs');
-          (async()=>{const browser=await chromium.launch();const result=[];for(const url of ['https://naamiraa.ir/','https://naamiraa.ir/login','https://admin.naamiraa.ir/index.php?page=login']){for(const width of [390,1280]){const page=await browser.newPage({viewport:{width,height:900}});await page.goto(url,{waitUntil:'networkidle'});const proof=await page.evaluate(async()=>{for(let w=100;w<=900;w+=100)await document.fonts.load(w+' 18px Peyda','نامیرا ۱۲۳');await document.fonts.ready;return {family:getComputedStyle(document.body).fontFamily,controls:[...document.querySelectorAll('input,button,select,textarea')].filter(e=>getComputedStyle(e).display!=='none').every(e=>getComputedStyle(e).fontFamily.includes('Peyda')),loaded:[...document.fonts].filter(f=>f.family==='Peyda'&&f.status==='loaded').length,overflow:document.documentElement.scrollWidth>innerWidth,externalFont:!!document.querySelector('link[href*="fonts.googleapis.com"]')};});if(!proof.family.includes('Peyda')||!proof.controls||proof.loaded!==9||proof.overflow||proof.externalFont)throw Error(JSON.stringify({url,width,...proof}));await page.screenshot({path:'peyda-'+result.length+'.png',fullPage:true});result.push({url,width,...proof});await page.close();}}await browser.close();fs.writeFileSync('peyda-browser.json',JSON.stringify(result,null,2));console.log('PEYDA_BROWSER_VERIFIED '+JSON.stringify(result));})().catch(e=>{console.error(e);process.exit(1)});
+          (async()=>{const ip=JSON.parse(fs.readFileSync('peyda-release.json')).origin_ip;const browser=await chromium.launch({args:['--host-resolver-rules=MAP naamiraa.ir '+ip+', MAP admin.naamiraa.ir '+ip]});const result=[];for(const url of ['https://naamiraa.ir/','https://naamiraa.ir/login','https://admin.naamiraa.ir/index.php?page=login']){for(const width of [390,1280]){const page=await browser.newPage({viewport:{width,height:900}});await page.goto(url,{waitUntil:'networkidle'});const proof=await page.evaluate(async()=>{for(let w=100;w<=900;w+=100)await document.fonts.load(w+' 18px Peyda','نامیرا ۱۲۳');await document.fonts.ready;return {family:getComputedStyle(document.body).fontFamily,controls:[...document.querySelectorAll('input,button,select,textarea')].filter(e=>getComputedStyle(e).display!=='none').every(e=>getComputedStyle(e).fontFamily.includes('Peyda')),loaded:[...document.fonts].filter(f=>f.family==='Peyda'&&f.status==='loaded').length,overflow:document.documentElement.scrollWidth>innerWidth,externalFont:!!document.querySelector('link[href*="fonts.googleapis.com"]')};});if(!proof.family.includes('Peyda')||!proof.controls||proof.loaded!==9||proof.overflow||proof.externalFont)throw Error(JSON.stringify({url,width,...proof}));await page.screenshot({path:'peyda-'+result.length+'.png',fullPage:true});result.push({url,width,...proof});await page.close();}}await browser.close();fs.writeFileSync('peyda-browser.json',JSON.stringify(result,null,2));console.log('PEYDA_BROWSER_VERIFIED '+JSON.stringify(result));})().catch(e=>{console.error(e);process.exit(1)});
           JS
       - uses: actions/upload-artifact@v4
         if: always()
