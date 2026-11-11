@@ -1,0 +1,105 @@
+name: Deploy Naamiraa Peyda font
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-peyda.yml']
+permissions:
+  contents: read
+concurrency:
+  group: naamiraa-production-domains
+  cancel-in-progress: false
+jobs:
+  font:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE: 'dd9bc2645d84b18cc48d6d027714be0e5cf7282f'
+      PLAN: '[{"path":"views/layout.php","oldHash":"6ace32a0cdf1f80be9100defd366100a4ccdc0ce029e0c4a5ca610f5a391334f","newHash":"4ac9c50e71afc78154ea18dd503151c9ef1fd9cb5526691d7f43918bf626bb27"},{"path":"views/admin-layout.php","oldHash":"7652af3a3a416bc9763b642f80af8048baee232d331643833de8d2b7d3f3c495","newHash":"f5c3fb29bd8257da9a9b095d4b25e1aed1c81477a835f89f2fa816c692ad3895"},{"path":"public/assets/fonts.css","oldHash":null,"newHash":"156b12c0e614598f42602a35ccc22adca3b913dd8fb6e693f9d3674b591d5aa9"},{"path":"public/assets/fonts/peyda/peyda-100.ttf","oldHash":null,"newHash":"ff368e828697ad0f3f4624591c7a38c3e90b248feb10706e367478c8835664bc"},{"path":"public/assets/fonts/peyda/peyda-200.ttf","oldHash":null,"newHash":"bb4dd422a9eaf875a4b1164c73d938c5a6579929f681a2a19c5ea877be882beb"},{"path":"public/assets/fonts/peyda/peyda-300.ttf","oldHash":null,"newHash":"bb3818f4912acfb93bebab7a5ca4c562fb279099daa3e41a60e05d3067c05ce9"},{"path":"public/assets/fonts/peyda/peyda-400.ttf","oldHash":null,"newHash":"95ba59fa24a4b1f064ee6eb1651b1b96902751e8dd0843fafeb4f0f834eca03c"},{"path":"public/assets/fonts/peyda/peyda-500.ttf","oldHash":null,"newHash":"42ab30be77a37737e5f45cda3210114b6c34df966aa853b40ce7ce2c15132862"},{"path":"public/assets/fonts/peyda/peyda-600.ttf","oldHash":null,"newHash":"7b923f325d6ffdfcb59709b3868e8322ab1c45536b8e7f963be9ef2c8abcd923"},{"path":"public/assets/fonts/peyda/peyda-700.ttf","oldHash":null,"newHash":"77879b841e53997de2d8f43e601260079df0524042f6aba3e8ed0be45a89703d"},{"path":"public/assets/fonts/peyda/peyda-800.ttf","oldHash":null,"newHash":"80594afc0722d5b91b70d9ea9c576791f5258101ef5b3d8a11d3929392d4c954"},{"path":"public/assets/fonts/peyda/peyda-900.ttf","oldHash":null,"newHash":"34a94a646fb1db96c9f2d9249f13c4317144bc9afb704320918f6767fcf340a3"}]'
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: dd9bc2645d84b18cc48d6d027714be0e5cf7282f
+          path: namira-source
+          persist-credentials: false
+      - name: Validate changed PHP layouts
+        run: |
+          php -l namira-source/namira/views/layout.php
+          php -l namira-source/namira/views/admin-layout.php
+      - name: Back up and deploy local fonts
+        run: |
+          python3 -u - <<'PY'
+          import os,sys,ssl,json,hashlib,secrets
+          from pathlib import Path
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'namira-source/namira/deploy')
+          import domains as d
+          source=os.environ['SOURCE'];plan=json.loads(os.environ['PLAN'])
+          release='fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57';prefix='_namira_live/releases/'+release
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          before={};changed=[];probe=None;backup='_namira_live/backups/peyda-'+source[:12]
+          def digest(raw):return hashlib.sha256(raw).hexdigest() if raw is not None else None
+          try:
+              assert release.encode() in r.read('_namira_live/current.php'),'Unexpected release'
+              config=r.read('_namira_live/config.local.json')
+              for item in plan:
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes();assert digest(raw)==item['newHash']
+                  if item['path'].endswith('.ttf'):assert raw[:4] in [b'\x00\x01\x00\x00',b'OTTO'],'Invalid font header'
+                  item['targets']=[root+'/'+item['path'][7:] for root in ['public_html','admin.naamiraa.ir']] if item['path'].startswith('public/') else [prefix+'/'+item['path']]
+                  for target in item['targets']:
+                      old=r.maybe(target);assert digest(old) in [item['oldHash'],item['newHash']],'Unexpected installed revision '+target
+                      before[target]=old
+                      if old is not None:r.put(backup+'/'+target,old,True)
+              for item in sorted(plan,key=lambda x:not x['path'].startswith('public/')):
+                  raw=Path('namira-source/namira/'+item['path']).read_bytes()
+                  for target in item['targets']:
+                      if raw!=before[target]:r.put(target,raw,target.startswith('_namira_live/'));changed.append(target)
+                      assert r.read(target)==raw
+              token=secrets.token_hex(32);name='_namira-font-'+secrets.token_hex(16)+'.php';probe='admin.naamiraa.ir/'+name
+              php="""<?php
+              if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_FONT']??''))){http_response_code(404);exit;}
+              clearstatcache();if(function_exists('opcache_invalidate'))foreach(['layout.php','admin-layout.php'] as $file)opcache_invalidate(dirname(__DIR__).'/_namira_live/releases/fdf54bc5ecbed81eecd05be44247ce820e3d3cd1-d2229918ef57/views/'.$file,true);
+              header('Content-Type: application/json');header('Cache-Control: no-store');echo '{"ok":true}';
+              """.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest())
+              r.put(probe,php.encode(),False)
+              with urlopen(Request('https://admin.naamiraa.ir/'+name,headers={'X-Namira-Font':token}),context=ssl.create_default_context(),timeout=60) as response:assert json.load(response)['ok']
+              assert r.read('_namira_live/config.local.json')==config,'Private configuration changed'
+              result={'source':source,'backup':backup,'files_changed':len(changed),'weights':9,'database_changed':False}
+              Path('peyda-release.json').write_text(json.dumps(result,indent=2));print('PEYDA_DEPLOYED '+json.dumps(result),flush=True)
+          except Exception:
+              for target in reversed(changed):
+                  try:
+                      if before[target] is None:r.remove_created(target)
+                      else:r.put(target,before[target],target.startswith('_namira_live/'))
+                  except Exception:print('RESTORE_NEEDS_CHECK '+target,flush=True)
+              raise
+          finally:
+              if probe:r.remove_created(probe)
+              try:f.quit()
+              except Exception:f.close()
+          
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Verify real font loading on public and admin hosts
+        run: |
+          node <<'JS'
+          const {chromium}=require('playwright'),fs=require('fs');
+          (async()=>{const browser=await chromium.launch();const result=[];for(const url of ['https://naamiraa.ir/','https://naamiraa.ir/login','https://admin.naamiraa.ir/index.php?page=login']){for(const width of [390,1280]){const page=await browser.newPage({viewport:{width,height:900}});await page.goto(url,{waitUntil:'networkidle'});const proof=await page.evaluate(async()=>{for(let w=100;w<=900;w+=100)await document.fonts.load(w+' 18px Peyda','نامیرا ۱۲۳');await document.fonts.ready;return {family:getComputedStyle(document.body).fontFamily,controls:[...document.querySelectorAll('input,button,select,textarea')].filter(e=>getComputedStyle(e).display!=='none').every(e=>getComputedStyle(e).fontFamily.includes('Peyda')),loaded:[...document.fonts].filter(f=>f.family==='Peyda'&&f.status==='loaded').length,overflow:document.documentElement.scrollWidth>innerWidth,externalFont:!!document.querySelector('link[href*="fonts.googleapis.com"]')};});if(!proof.family.includes('Peyda')||!proof.controls||proof.loaded!==9||proof.overflow||proof.externalFont)throw Error(JSON.stringify({url,width,...proof}));await page.screenshot({path:'peyda-'+result.length+'.png',fullPage:true});result.push({url,width,...proof});await page.close();}}await browser.close();fs.writeFileSync('peyda-browser.json',JSON.stringify(result,null,2));console.log('PEYDA_BROWSER_VERIFIED '+JSON.stringify(result));})().catch(e=>{console.error(e);process.exit(1)});
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naamiraa-peyda
+          path: |
+            peyda-release.json
+            peyda-browser.json
+            peyda-*.png
+          retention-days: 14
