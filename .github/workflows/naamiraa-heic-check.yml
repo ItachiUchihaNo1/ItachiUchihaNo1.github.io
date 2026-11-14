@@ -1,0 +1,40 @@
+name: Check Naamiraa HEIC capability
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/naamiraa-heic-check.yml']
+permissions:
+  contents: read
+jobs:
+  capability:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      DEPLOY_FTPS_HOST: ${{ secrets.DEPLOY_FTPS_HOST }}
+      DEPLOY_FTPS_USER: ${{ secrets.DEPLOY_FTPS_USER }}
+      DEPLOY_FTPS_PASSWORD: ${{ secrets.DEPLOY_FTPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ItachiUchihaNo1/heiat-network
+          ref: 4aa22aefd15a4e40c889490be3a53356663c9299
+          path: source
+          persist-credentials: false
+      - run: |
+          python3 - <<'PY'
+          import os,sys,ssl,secrets,hashlib,json,socket
+          from urllib.request import Request,urlopen
+          sys.path.insert(0,'source/namira/deploy')
+          import domains as d
+          f=d.FTP_TLS(context=ssl.create_default_context(),timeout=60);f.connect(os.environ['DEPLOY_FTPS_HOST'],21);f.login(os.environ['DEPLOY_FTPS_USER'],os.environ['DEPLOY_FTPS_PASSWORD']);f.prot_p();r=d.Remote(f)
+          ip=f.sock.getpeername()[0];original=socket.getaddrinfo
+          socket.getaddrinfo=lambda host,port,*a,**kw:original(ip if host=='admin.naamiraa.ir' else host,port,*a,**kw)
+          token=secrets.token_hex(32);name='_namira-heic-'+secrets.token_hex(16)+'.php';target='admin.naamiraa.ir/'+name
+          php="""<?php if(!hash_equals('__HASH__',hash('sha256',$_SERVER['HTTP_X_NAMIRA_CAPABILITY']??''))){http_response_code(404);exit;}header('Content-Type: application/json');header('Cache-Control: no-store');echo json_encode(['imagick'=>class_exists('Imagick'),'heic'=>class_exists('Imagick')&&count(Imagick::queryFormats('HEIC'))>0]);"""
+          try:
+              r.put(target,php.replace('__HASH__',hashlib.sha256(token.encode()).hexdigest()).encode(),False)
+              with urlopen(Request('https://admin.naamiraa.ir/'+name,headers={'X-Namira-Capability':token}),context=ssl.create_default_context(),timeout=60) as response:proof=json.load(response)
+              print('HEIC_CAPABILITY '+json.dumps(proof),flush=True)
+          finally:
+              r.remove_created(target);f.quit()
+          PY
